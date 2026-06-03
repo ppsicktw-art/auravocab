@@ -537,7 +537,12 @@
 
           <div className="text-center flex-1">
             <p className="text-slate-500 font-bold uppercase tracking-wider mb-2">{current.pos}</p>
-            <h2 className="text-4xl font-black text-slate-800 mb-8">{current.zh}</h2>
+            <div className="flex justify-center items-center gap-3 mb-8">
+              <h2 className="text-4xl font-black text-slate-800">{current.zh}</h2>
+              <button onClick={() => playAudio(current.word)} title="聽音辨字" className="p-3 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors shadow-sm active:scale-95">
+                <Icon name="Volume2" size={28} />
+              </button>
+            </div>
             
             {!isRevealed ? (
               <div className="space-y-4">
