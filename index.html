@@ -2,611 +2,612 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>AuraVocab</title>
-  
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- React & ReactDOM -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AuraVocab App</title>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  
-  <!-- Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    /* 隱藏滾動條但保留滾動功能 */
+    body { margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
     .scrollbar-hide::-webkit-scrollbar { display: none; }
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-    /* 防止手機點擊輸入框時自動放大畫面 */
-    input, textarea { font-size: 16px !important; }
+    @supports (-webkit-touch-callout: none) {
+      .h-dvh { height: -webkit-fill-available; }
+    }
+    .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
-  
+<body>
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useCallback } = React;
 
-    // --- 圖示元件模擬 (SVG 替代) ---
-    const Icon = ({ name, size = 24, className = "", fill = "none" }) => {
-      const svgRef = useRef(null);
-      useEffect(() => {
-        if (svgRef.current && window.lucide) {
-          window.lucide.createIcons({
-            icons: { [name]: window.lucide.icons[name] },
-            nameAttr: 'data-lucide',
-            root: svgRef.current
-          });
-        }
-      }, [name]);
-      return <span ref={svgRef}><i data-lucide={name} width={size} height={size} className={className} style={{fill: fill}}></i></span>;
+    // --- SVG 圖示庫 ---
+    const Icon = ({ name, size = 24, className = "" }) => {
+      const icons = {
+        Search: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
+        Book: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>`,
+        Brain: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/></svg>`,
+        Settings: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
+        Volume2: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>`,
+        CheckCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>`,
+        Trash2: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`,
+        AlertCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>`,
+        Loader2: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`,
+        Camera: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>`,
+        UploadCloud: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>`,
+        PlusCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>`,
+        Key: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>`,
+        PartyPopper: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M5.8 11.3 2 22l10.7-3.79"/><path d="M4 3h.01"/><path d="M22 8h.01"/><path d="M15 2h.01"/><path d="M22 20h.01"/><path d="m22 2-2.24.75a2.9 2.9 0 0 0-1.96 3.12v0c.1.86-.57 1.63-1.45 1.63h-.38c-.86 0-1.6.6-1.76 1.44L14 10"/><path d="m22 13-.82-.33c-.86-.34-1.82.2-1.98 1.11v0c-.11.7-.72 1.22-1.43 1.22H17"/><path d="m11 2 .33.82c.34.86-.2 1.82-1.11 1.98v0C9.52 4.91 9 5.52 9 6.23V7"/><path d="M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z"/></svg>`
+      };
+      return <div dangerouslySetInnerHTML={{ __html: icons[name] }} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} />;
     };
-
-    const SearchIcon = (p) => <Icon name="Search" {...p}/>;
-    const BookIcon = (p) => <Icon name="Book" {...p}/>;
-    const BrainIcon = (p) => <Icon name="Brain" {...p}/>;
-    const SettingsIcon = (p) => <Icon name="Settings" {...p}/>;
-    const Volume2Icon = (p) => <Icon name="Volume2" {...p}/>;
-    const Volume1Icon = (p) => <Icon name="Volume1" {...p}/>;
-    const StarIcon = (p) => <Icon name="Star" {...p}/>;
-    const CheckCircleIcon = (p) => <Icon name="CheckCircle" {...p}/>;
-    const Trash2Icon = (p) => <Icon name="Trash2" {...p}/>;
-    const AlertCircleIcon = (p) => <Icon name="AlertCircle" {...p}/>;
-    const ChevronRightIcon = (p) => <Icon name="ChevronRight" {...p}/>;
-    const Loader2Icon = (p) => <Icon name="Loader2" className={`animate-spin ${p.className}`} {...p}/>;
-    const SparklesIcon = (p) => <Icon name="Sparkles" {...p}/>;
-    const XCircleIcon = (p) => <Icon name="XCircle" {...p}/>;
-    const CheckIcon = (p) => <Icon name="Check" {...p}/>;
-    const KeyIcon = (p) => <Icon name="Key" {...p}/>;
 
     // ==========================================
-    // 系統全域設定與 API 參數
+    // 系統常數 & 共用函式
     // ==========================================
-    const TEXT_MODEL = "gemini-2.5-flash"; 
-    const TTS_MODEL = "gemini-2.5-flash"; // 可視情況改用 gemini-2.5-flash 語音
-
-    const fetchWithRetry = async (url, options, maxRetries = 5) => {
-      let delays = [1000, 2000, 4000, 8000, 16000];
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          const response = await fetch(url, options);
-          if (!response.ok) {
-             throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          return await response.json();
-        } catch (error) {
-          if (error.message.includes('429') || error.message.includes('400')) throw error; 
-          if (i === maxRetries - 1) throw error;
-          await new Promise(res => setTimeout(res, delays[i]));
-        }
-      }
-    };
-
-    const playAudio = (text, voice, apiKey) => {
-      if (!text) return;
-      
-      // 目前網頁端呼叫 Gemini TTS 容易遇到 CORS，故統一降級為裝置原生語音，確保發音順暢零延遲
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      window.speechSynthesis.speak(utterance);
-    };
+    const TEXT_MODEL = "gemini-2.5-flash";
+    
+    // 初始化單字的 Anki (SM-2) 參數
+    const initAnkiParams = (wordObj) => ({
+      ...wordObj,
+      repetition: 0,
+      interval: 0,
+      easeFactor: 2.5,
+      nextReview: Date.now(), // 預設立即可以複習
+      mastered: false, // 標記為精通(不再測驗)
+      addedAt: Date.now()
+    });
 
     const MOCK_VOCAB = [
-      { word: "resilience", ipa: "/rɪˈzɪliəns/", pos: "noun", zh: "韌性；恢復力", enDef: "The capacity to recover quickly from difficulties; toughness.", exampleEn: "She showed great resilience in the face of adversity.", exampleZh: "她在逆境中展現了極大的韌性。", attempts: 2, errors: 1, starred: true, mastered: false, addedAt: Date.now() },
-      { word: "ephemeral", ipa: "/ɪˈfemərəl/", pos: "adj.", zh: "短暫的", enDef: "Lasting for a very short time.", exampleEn: "Fashions are ephemeral.", exampleZh: "時尚是短暫的。", attempts: 5, errors: 4, starred: false, mastered: false, addedAt: Date.now() - 1000 }
+      initAnkiParams({ word: "resilience", ipa: "/rɪˈzɪliəns/", pos: "noun", zh: "韌性；恢復力", enDef: "The capacity to recover quickly from difficulties.", exampleEn: "She showed great resilience in the face of adversity.", exampleZh: "她在逆境中展現了極大的韌性。" })
     ];
 
+    // ==========================================
+    // 主應用程式 App Component
+    // ==========================================
     function App() {
       const [activeTab, setActiveTab] = useState('search');
       
-      // 自動讀取字庫與設定 (包含 API Key)
       const [vocabList, setVocabList] = useState(() => {
-        const savedData = localStorage.getItem('auraVocab_list');
-        return savedData ? JSON.parse(savedData) : MOCK_VOCAB;
+        const saved = localStorage.getItem('auraVocabList');
+        return saved ? JSON.parse(saved) : MOCK_VOCAB;
       });
 
       const [settings, setSettings] = useState(() => {
-        const savedSettings = localStorage.getItem('auraVocab_settings');
-        return savedSettings ? JSON.parse(savedSettings) : { voice: 'Native', apiKey: '' };
+        const saved = localStorage.getItem('auraSettings');
+        return saved ? JSON.parse(saved) : { apiKey: '' };
       });
 
-      // 自動存檔
-      useEffect(() => {
-        localStorage.setItem('auraVocab_list', JSON.stringify(vocabList));
-      }, [vocabList]);
+      // 自動存檔機制
+      useEffect(() => { localStorage.setItem('auraVocabList', JSON.stringify(vocabList)); }, [vocabList]);
+      useEffect(() => { localStorage.setItem('auraSettings', JSON.stringify(settings)); }, [settings]);
 
-      useEffect(() => {
-        localStorage.setItem('auraVocab_settings', JSON.stringify(settings));
-      }, [settings]);
+      const playAudio = (text) => {
+        if (!text) return;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-US';
+        window.speechSynthesis.speak(utterance);
+      };
+
+      // 計算今日需複習的數量 (Badge)
+      const dueCount = vocabList.filter(v => !v.mastered && v.nextReview <= Date.now()).length;
+
+      if (!settings.apiKey && activeTab !== 'settings') {
+        return (
+          <div className="h-screen w-full bg-slate-50 flex items-center justify-center p-6">
+            <div className="bg-white p-8 rounded-3xl shadow-lg max-w-md w-full text-center">
+              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <Icon name="Key" size={32} />
+              </div>
+              <h1 className="text-2xl font-bold text-slate-800 mb-2">歡迎使用 AuraVocab</h1>
+              <p className="text-slate-500 mb-8">為了啟用 AI 智慧分析與圖片辨識功能，請先綁定您的 Gemini API Key。</p>
+              <button onClick={() => setActiveTab('settings')} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700">前往設定金鑰</button>
+            </div>
+          </div>
+        );
+      }
 
       return (
-        <div className="h-[100dvh] w-full bg-slate-50 flex flex-col md:flex-row text-slate-800 font-sans overflow-hidden">
-          
-          {/* 電腦版左側邊欄 */}
+        <div className="h-dvh w-full bg-slate-50 flex flex-col md:flex-row text-slate-800 font-sans overflow-hidden">
+          {/* 電腦版側邊欄 */}
           <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 shrink-0">
             <div className="p-6 border-b border-slate-100 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
-                <SparklesIcon size={18} />
-              </div>
+              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-xl">A</div>
               <h1 className="text-xl font-bold text-slate-800 tracking-tight">AuraVocab</h1>
             </div>
             <nav className="flex-1 p-4 space-y-2">
-              <NavItem active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon={<SearchIcon size={20} />} label="智慧查詢" />
-              <NavItem active={activeTab === 'library'} onClick={() => setActiveTab('library')} icon={<BookIcon size={20} />} label="我的單字庫" badge={vocabList.length} />
-              <NavItem active={activeTab === 'quiz'} onClick={() => setActiveTab('quiz')} icon={<BrainIcon size={20} />} label="拼寫測驗" />
-              <NavItem active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={<SettingsIcon size={20} />} label="設定" />
+              <NavItem active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon="Search" label="單字查詢" />
+              <NavItem active={activeTab === 'vision'} onClick={() => setActiveTab('vision')} icon="Camera" label="圖片萃取" />
+              <NavItem active={activeTab === 'library'} onClick={() => setActiveTab('library')} icon="Book" label="單字庫" />
+              <NavItem active={activeTab === 'quiz'} onClick={() => setActiveTab('quiz')} icon="Brain" label="AI 複習" badge={dueCount > 0 ? dueCount : undefined} />
+              <NavItem active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon="Settings" label="設定" />
             </nav>
           </aside>
 
-          {/* 核心內容區 */}
+          {/* 內容區 */}
           <main className="flex-1 flex flex-col min-h-0 relative">
-            <header className="md:hidden shrink-0 bg-white/80 backdrop-blur-md border-b border-slate-200 p-4 sticky top-0 z-10 flex items-center gap-2">
-               <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
-                <SparklesIcon size={16} />
-              </div>
+            <header className="md:hidden shrink-0 bg-white border-b border-slate-200 p-4 sticky top-0 z-10 flex justify-center items-center">
               <h1 className="text-lg font-bold">AuraVocab</h1>
             </header>
             
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-32">
-              {activeTab === 'search' && <SearchTab vocabList={vocabList} setVocabList={setVocabList} settings={settings} />}
-              {activeTab === 'library' && <LibraryTab vocabList={vocabList} setVocabList={setVocabList} settings={settings} />}
-              {activeTab === 'quiz' && <QuizTab vocabList={vocabList} setVocabList={setVocabList} settings={settings} />}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+              {activeTab === 'search' && <SearchTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} />}
+              {activeTab === 'vision' && <VisionTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} />}
+              {activeTab === 'library' && <LibraryTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} />}
+              {activeTab === 'quiz' && <QuizTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} />}
               {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} />}
             </div>
           </main>
 
-          {/* 手機版大拇指底部導覽列 (特別墊高 pb-[calc(1rem+env(safe-area-inset-bottom))] 確保不被橫條擋住) */}
-          <nav className="md:hidden shrink-0 bg-white border-t border-slate-200 flex justify-around px-2 pt-2 pb-[calc(20px+env(safe-area-inset-bottom))] shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] absolute bottom-0 left-0 right-0 z-20">
-            <MobileNavItem active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon={<SearchIcon size={22} />} label="查詢" />
-            <MobileNavItem active={activeTab === 'library'} onClick={() => setActiveTab('library')} icon={<BookIcon size={22} />} label="字庫" />
-            <MobileNavItem active={activeTab === 'quiz'} onClick={() => setActiveTab('quiz')} icon={<BrainIcon size={22} />} label="測驗" />
-            <MobileNavItem active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={<SettingsIcon size={22} />} label="設定" />
+          {/* 手機版底部導覽 */}
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around px-1 pt-2 pb-6 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] z-50">
+            <MobileNavItem active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon="Search" label="查詢" />
+            <MobileNavItem active={activeTab === 'vision'} onClick={() => setActiveTab('vision')} icon="Camera" label="圖片" />
+            <MobileNavItem active={activeTab === 'library'} onClick={() => setActiveTab('library')} icon="Book" label="字庫" />
+            <MobileNavItem active={activeTab === 'quiz'} onClick={() => setActiveTab('quiz')} icon="Brain" label="複習" badge={dueCount > 0 ? dueCount : undefined} />
+            <MobileNavItem active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon="Settings" label="設定" />
           </nav>
         </div>
       );
     }
 
     // ==========================================
-    // 分頁元件: 智慧查詢 (Search)
+    // 圖片擷取 (Vision)
     // ==========================================
-    function SearchTab({ vocabList, setVocabList, settings }) {
+    function VisionTab({ vocabList, setVocabList, apiKey, playAudio }) {
+      const [images, setImages] = useState([]);
+      const [isProcessing, setIsProcessing] = useState(false);
+      const [status, setStatus] = useState('');
+      const [countdown, setCountdown] = useState(0);
+      const [extractedWords, setExtractedWords] = useState([]);
+      const fileInputRef = useRef(null);
+
+      const processFiles = (files) => {
+        const fileArr = Array.from(files);
+        fileArr.forEach(file => {
+          if (!file.type.startsWith('image/')) return;
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            setImages(prev => [...prev, { file, dataUrl: e.target.result, status: 'pending' }]);
+          };
+          reader.readAsDataURL(file);
+        });
+      };
+
+      const extractVocabFromImage = async (base64String, mimeType) => {
+        const base64Data = base64String.split(',')[1];
+        const prompt = `You are an expert English teacher. Look at this image and extract the most meaningful English vocabulary words or short phrases for a learner. Ignore simple words like 'the', 'is', 'a'. Return a strict JSON array of objects. Maximum 15 words. Each object must have this exact structure: {"word": "the word", "ipa": "IPA pronunciation like /wɜːrd/", "pos": "part of speech", "zh": "Traditional Chinese meaning", "enDef": "English definition", "exampleEn": "A practical example sentence", "exampleZh": "Translation of the example"} Return ONLY the JSON array. Do not use markdown wrappers.`;
+
+        const payload = { contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Data } }] }], generationConfig: { responseMimeType: "application/json" } };
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+
+        if (response.status === 429) throw new Error("429");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+        const jsonText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!jsonText) throw new Error("No data returned");
+        return JSON.parse(jsonText);
+      };
+
+      const handleStartExtraction = async () => {
+        if (images.length === 0) return;
+        setIsProcessing(true);
+        setExtractedWords([]);
+        let allNewWords = [];
+
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          let success = false;
+          while (!success) {
+            try {
+              setStatus(`正在分析圖片 ${i + 1}/${images.length}...`);
+              const result = await extractVocabFromImage(img.dataUrl, img.file.type);
+              
+              const uniqueWords = result.filter(newWord => 
+                !vocabList.some(v => v.word.toLowerCase() === newWord.word.toLowerCase()) &&
+                !allNewWords.some(v => v.word.toLowerCase() === newWord.word.toLowerCase())
+              );
+              
+              allNewWords = [...allNewWords, ...uniqueWords];
+              setExtractedWords([...allNewWords]); 
+              success = true;
+            } catch (err) {
+              if (err.message === "429") {
+                setStatus(`API 限制保護觸發！`);
+                for(let sec = 60; sec > 0; sec--) {
+                   setCountdown(sec);
+                   await new Promise(r => setTimeout(r, 1000));
+                }
+                setCountdown(0);
+                setStatus(`恢復連線，重試圖片 ${i + 1}...`);
+              } else {
+                setStatus(`圖片 ${i + 1} 解析失敗跳過`);
+                await new Promise(r => setTimeout(r, 1500));
+                success = true; 
+              }
+            }
+          }
+        }
+        setStatus(allNewWords.length > 0 ? `萃取完成！共發現 ${allNewWords.length} 個新單字。` : '圖片中沒有找到新的未學單字。');
+        setIsProcessing(false);
+        setImages([]);
+      };
+
+      const saveToLibrary = (wordObj) => {
+        setVocabList(prev => [initAnkiParams(wordObj), ...prev]);
+        setExtractedWords(prev => prev.filter(w => w.word !== wordObj.word));
+      };
+
+      const saveAllToLibrary = () => {
+        const wordsToAdd = extractedWords.map(w => initAnkiParams(w));
+        setVocabList(prev => [...wordsToAdd, ...prev]);
+        setExtractedWords([]);
+        setStatus('已全部存入單字庫！');
+      };
+
+      return (
+        <div className="max-w-2xl mx-auto space-y-6">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-4"><Icon name="Camera" className="text-indigo-500" /> 圖片自動萃取單字</h2>
+            <p className="text-slate-500 mb-6 text-sm">上傳課本照片、網頁截圖或菜單，AI 會自動幫您找出重要的英文單字，並過濾掉您已經學過的字！</p>
+
+            {!isProcessing && images.length === 0 && extractedWords.length === 0 && (
+              <div onClick={() => fileInputRef.current.click()} className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:bg-slate-50 hover:border-indigo-400 transition-colors">
+                <Icon name="UploadCloud" size={48} className="mx-auto text-slate-400 mb-4" />
+                <p className="text-slate-600 font-bold text-lg mb-1">點擊拍照或上傳圖片</p>
+                <p className="text-slate-400 text-sm">支援 JPG, PNG (可多選)</p>
+                <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={(e) => processFiles(e.target.files)} />
+              </div>
+            )}
+
+            {images.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex gap-3 overflow-x-auto pb-2">
+                  {images.map((img, i) => (
+                    <div key={i} className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden border border-slate-200"><img src={img.dataUrl} className="w-full h-full object-cover" /></div>
+                  ))}
+                </div>
+                {isProcessing ? (
+                  <div className="bg-indigo-50 p-4 rounded-xl flex items-center justify-between border border-indigo-100">
+                     <div className="flex items-center gap-3"><Icon name="Loader2" className="animate-spin text-indigo-500" /><span className="font-bold text-indigo-700">{status}</span></div>
+                     {countdown > 0 && <span className="text-red-500 font-bold">倒數 {countdown} 秒</span>}
+                  </div>
+                ) : (
+                  <div className="flex gap-3">
+                    <button onClick={() => setImages([])} className="px-4 py-3 rounded-xl font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 flex-1">重新選擇</button>
+                    <button onClick={handleStartExtraction} className="px-4 py-3 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 flex-1">開始萃取單字</button>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {!isProcessing && status && images.length === 0 && extractedWords.length === 0 && <div className="p-4 bg-green-50 text-green-700 rounded-xl font-bold text-center border border-green-200">{status}</div>}
+          </div>
+
+          {extractedWords.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-end px-2">
+                <h3 className="font-bold text-slate-700 text-lg">新發現的單字 ({extractedWords.length})</h3>
+                <button onClick={saveAllToLibrary} className="text-indigo-600 font-bold flex items-center gap-1 text-sm bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100"><Icon name="PlusCircle" size={16} /> 全部加入字庫</button>
+              </div>
+              <div className="grid gap-3">
+                {extractedWords.map((wordObj, idx) => (
+                  <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <button onClick={() => playAudio(wordObj.word)} className="text-amber-500 hover:text-amber-600"><Icon name="Volume2" size={20} /></button>
+                        <span className="text-xl font-bold text-slate-900">{wordObj.word}</span>
+                        <span className="text-slate-400 text-sm ml-2 font-mono">{wordObj.ipa}</span>
+                      </div>
+                      <div className="flex gap-2 items-center mb-2"><span className="bg-slate-100 text-slate-500 text-xs px-2 py-0.5 rounded uppercase font-bold">{wordObj.pos}</span><span className="text-slate-800 font-bold">{wordObj.zh}</span></div>
+                      <p className="text-sm text-slate-500 italic mt-1">{wordObj.exampleEn}</p>
+                    </div>
+                    <button onClick={() => saveToLibrary(wordObj)} className="shrink-0 bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-sm h-fit self-end md:self-center flex items-center gap-2"><Icon name="Book" size={16} /> 存入</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 智慧查詢 (Search)
+    // ==========================================
+    function SearchTab({ vocabList, setVocabList, apiKey, playAudio }) {
       const [query, setQuery] = useState('');
       const [loading, setLoading] = useState(false);
       const [result, setResult] = useState(null);
       const [error, setError] = useState(null);
 
-      const searchWord = async (wordToSearch) => {
-        const targetWord = wordToSearch.trim().toLowerCase();
+      const searchWord = async () => {
+        const targetWord = query.trim().toLowerCase();
         if (!targetWord) return;
-        
-        setQuery(targetWord);
-        setLoading(true);
-        setError(null);
-        setResult(null);
+        setLoading(true); setError(null); setResult(null);
 
         try {
-          // 動態檢查有沒有輸入 API Key
-          if(!settings.apiKey) {
-             throw new Error("尚未綁定 API 金鑰！請先至下方「設定」分頁填寫您的 Gemini API Key。");
-          }
+          const prompt = `Analyze the English word: "${targetWord}". Provide JSON response: {"word": "exact word lowercase", "ipa": "IPA", "pos": "part of speech", "zh": "Traditional Chinese", "enDef": "English definition", "exampleEn": "Example sentence", "exampleZh": "Traditional Chinese example translation"}`;
+          const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } };
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`, { method: 'POST', body: JSON.stringify(payload) });
 
-          const prompt = `You are an expert bilingual dictionary (English to Traditional Chinese). Analyze the English word: "${targetWord}".
-          Provide a detailed JSON response exactly following this structure, no markdown or comments:
-          {
-            "word": "the exact requested word in lowercase",
-            "ipa": "standard IPA pronunciation like /wɜːrd/",
-            "pos": "part of speech (e.g., noun, verb)",
-            "zh": "accurate Traditional Chinese translation",
-            "enDef": "clear English definition",
-            "exampleEn": "A practical daily life example sentence in English using the word.",
-            "exampleZh": "The Traditional Chinese translation of the example sentence."
-          }`;
+          if (response.status === 429) throw new Error("API 請求過於頻繁，請休息 1 分鐘後再試。");
+          if (!response.ok) throw new Error("查詢失敗");
 
-          const payload = {
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json" }
-          };
-
-          const data = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${settings.apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-
-          const jsonText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!jsonText) throw new Error("AI 回應格式錯誤");
-          
-          const parsed = JSON.parse(jsonText);
+          const data = await response.json();
+          const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
           setResult(parsed);
-          
-          playAudio(parsed.word, settings.voice, settings.apiKey);
-
-        } catch (err) {
-          if (err.message.includes('429')) {
-             setError("⚠️ 查詢次數太頻繁囉！系統受到限制，請休息 1 到 2 分鐘後再試。");
-          } else if (err.message.includes('400')) {
-             setError("⚠️ API 金鑰無效或模型名稱錯誤，請至「設定」檢查。");
-          } else {
-             setError(err.message || "查詢失敗，請稍後再試。");
-          }
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      const handleInteractiveWordClick = (word) => {
-        const cleanWord = word.replace(/[^a-zA-Z]/g, '');
-        if (cleanWord) {
-          searchWord(cleanWord);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      };
-
-      const saveToLibrary = () => {
-        if (!result) return;
-        const exists = vocabList.some(v => v.word.toLowerCase() === result.word.toLowerCase());
-        if (!exists) {
-          const newWord = { ...result, attempts: 0, errors: 0, starred: false, mastered: false, addedAt: Date.now() };
-          setVocabList(prev => [newWord, ...prev]);
-        }
+          playAudio(parsed.word);
+        } catch (err) { setError(err.message); } finally { setLoading(false); }
       };
 
       const isSaved = result && vocabList.some(v => v.word.toLowerCase() === result.word.toLowerCase());
+      const saveWord = () => { if (!isSaved) setVocabList(prev => [initAnkiParams(result), ...prev]); };
 
       return (
         <div className="max-w-2xl mx-auto space-y-6">
-          <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex items-center focus-within:ring-2 focus-within:ring-indigo-500 transition-all">
-            <SearchIcon className="text-slate-400 ml-3 mr-2" size={20} />
-            <input 
-              type="text" 
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && searchWord(query)}
-              placeholder="輸入英文單字..."
-              className="flex-1 bg-transparent border-none focus:outline-none p-2 text-lg w-full min-w-0"
-            />
-            <button 
-              onClick={() => searchWord(query)}
-              disabled={loading || !query.trim()}
-              className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors shrink-0"
-            >
-              查詢
-            </button>
+          <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex items-center">
+            <Icon name="Search" className="text-slate-400 mx-3" size={20} />
+            <input type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchWord()} placeholder="輸入單字查詢..." className="flex-1 bg-transparent outline-none p-2 text-lg" />
+            <button onClick={searchWord} disabled={loading} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold disabled:opacity-50">查詢</button>
           </div>
-
-          {loading && (
-            <div className="flex flex-col items-center justify-center py-20 text-slate-500">
-              <Loader2Icon className="mb-4 text-indigo-500" size={32} />
-              <p>AI 智慧解析中...</p>
-            </div>
-          )}
-
-          {error && (
-            <div className="p-4 bg-red-50 text-red-600 rounded-xl flex items-start gap-3 border border-red-100">
-              <AlertCircleIcon size={20} className="shrink-0 mt-0.5" />
-              <p>{error}</p>
-            </div>
-          )}
-
+          {loading && <div className="text-center py-10 text-indigo-500"><Icon name="Loader2" className="animate-spin mx-auto mb-2" size={32}/>分析中...</div>}
+          {error && <div className="p-4 bg-red-50 text-red-600 rounded-xl flex items-center gap-2"><Icon name="AlertCircle" /> {error}</div>}
           {result && !loading && (
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 animate-in fade-in duration-500">
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <div className="flex items-center gap-3">
-                    <h2 className="text-4xl font-black text-slate-900 tracking-tight">{result.word}</h2>
-                    <button onClick={() => playAudio(result.word, settings.voice, settings.apiKey)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors">
-                      <Volume2Icon size={24} />
-                    </button>
+                    <h2 className="text-4xl font-black text-slate-900">{result.word}</h2>
+                    <button onClick={() => playAudio(result.word)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full"><Icon name="Volume2" /></button>
                   </div>
-                  <p className="text-slate-500 mt-2 font-mono text-lg">{result.ipa} • <span className="text-indigo-500 italic">{result.pos}</span></p>
+                  <p className="text-slate-500 mt-2 font-mono">{result.ipa} • <span className="text-indigo-500 italic">{result.pos}</span></p>
                 </div>
-                <button 
-                  onClick={saveToLibrary}
-                  disabled={isSaved}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium transition-colors shrink-0 ${isSaved ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
-                >
-                  {isSaved ? <><CheckCircleIcon size={18} /> <span className="hidden sm:inline">已收藏</span></> : <><BookIcon size={18} /> <span className="hidden sm:inline">收藏單字</span></>}
+                <button onClick={saveWord} disabled={isSaved} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold ${isSaved ? 'bg-green-50 text-green-600' : 'bg-slate-900 text-white'}`}>
+                  {isSaved ? <><Icon name="CheckCircle" size={18}/> 已收藏</> : <><Icon name="Book" size={18}/> 收藏</>}
                 </button>
               </div>
+              <div className="space-y-4">
+                <div className="bg-slate-50 p-4 rounded-xl"><p className="text-2xl font-bold">{result.zh}</p></div>
+                <p className="text-slate-700 text-lg">{result.enDef}</p>
+                <div className="border-t border-slate-100 pt-4"><p className="text-lg font-medium">{result.exampleEn}</p><p className="text-slate-500 mt-1">{result.exampleZh}</p></div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
 
-              <div className="space-y-6">
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Traditional Chinese</h3>
-                  <p className="text-2xl font-bold text-slate-800">{result.zh}</p>
+    // ==========================================
+    // 我的單字庫 (Library)
+    // ==========================================
+    function LibraryTab({ vocabList, setVocabList, playAudio }) {
+      const toggleProperty = (word, prop) => setVocabList(prev => prev.map(v => v.word === word ? { ...v, [prop]: !v[prop] } : v));
+      const deleteWord = (word) => setVocabList(prev => prev.filter(v => v.word !== word));
+
+      return (
+        <div className="max-w-3xl mx-auto space-y-4">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-6">
+            <h2 className="text-xl font-bold">單字庫狀況</h2>
+            <p className="text-slate-500 mt-1">目前共收錄 {vocabList.length} 個單字，已標記排除測驗 {vocabList.filter(v=>v.mastered).length} 個。</p>
+          </div>
+          {vocabList.length === 0 ? <p className="text-center text-slate-400 py-10">字庫是空的，快去查詢或擷取單字吧！</p> : 
+           vocabList.map(item => (
+            <div key={item.word} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between gap-4">
+              <div className="flex gap-4 items-start">
+                <button onClick={() => playAudio(item.word)} className="p-2 bg-slate-100 text-slate-600 rounded-full mt-1 shrink-0"><Icon name="Volume2" size={20}/></button>
+                <div>
+                  <h3 className={`text-xl font-bold ${item.mastered ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{item.word}</h3>
+                  <p className="text-sm text-slate-500">{item.zh} • {item.ipa}</p>
+                  <div className="flex gap-2 mt-2">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-600">連續答對: {item.repetition || 0} 次</span>
+                    {item.nextReview > Date.now() && <span className="text-xs font-bold px-2 py-0.5 rounded bg-green-50 text-green-600">已排程複習</span>}
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => toggleProperty(item.word, 'mastered')} title="排除於測驗" className={`p-2 rounded-xl ${item.mastered ? 'text-green-600 bg-green-50' : 'text-slate-400 bg-slate-50'}`}><Icon name="CheckCircle" size={20}/></button>
+                <button onClick={() => deleteWord(item.word)} className="p-2 rounded-xl text-red-400 bg-slate-50"><Icon name="Trash2" size={20}/></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // AI 測驗 (Quiz - Anki SM-2 演算法)
+    // ==========================================
+    function QuizTab({ vocabList, setVocabList, playAudio }) {
+      const [dueCards, setDueCards] = useState([]);
+      const [current, setCurrent] = useState(null);
+      const [input, setInput] = useState('');
+      const [isRevealed, setIsRevealed] = useState(false);
+      const [isCorrect, setIsCorrect] = useState(null);
+
+      // 篩選今日需複習的卡片
+      useEffect(() => {
+        const now = Date.now();
+        const activeDue = vocabList.filter(v => !v.mastered && v.nextReview <= now);
+        setDueCards(activeDue);
+        
+        if (!current && activeDue.length > 0) {
+          setCurrent(activeDue[Math.floor(Math.random() * activeDue.length)]);
+        }
+      }, [vocabList, current]);
+
+      if (vocabList.length === 0) return <div className="text-center py-20 text-slate-500">請先加入單字才能進行複習！</div>;
+      if (dueCards.length === 0 && !current) return (
+        <div className="text-center py-20">
+          <Icon name="PartyPopper" size={64} className="mx-auto text-amber-400 mb-6" />
+          <h2 className="text-3xl font-black text-slate-800 mb-2">太棒了！</h2>
+          <p className="text-slate-500 text-lg">您已經完成所有今天的複習進度，請明天再來喔！</p>
+        </div>
+      );
+      if (!current) return null;
+
+      const handleCheck = () => {
+        if (!input.trim()) return;
+        const correct = input.toLowerCase().trim() === current.word.toLowerCase();
+        setIsCorrect(correct);
+        setIsRevealed(true);
+        playAudio(current.word);
+      };
+
+      const calculateNextInterval = (quality) => {
+        let repetition = current.repetition || 0;
+        let interval = current.interval || 0;
+        let easeFactor = current.easeFactor || 2.5;
+
+        if (quality >= 3) {
+          if (repetition === 0) interval = 1;
+          else if (repetition === 1) interval = 6;
+          else interval = Math.round(interval * easeFactor);
+          if (quality === 5) interval = Math.round(interval * 1.3);
+        } else {
+          interval = 0;
+        }
+        return interval;
+      };
+
+      const handleRating = (quality) => {
+        let repetition = current.repetition || 0;
+        let interval = current.interval || 0;
+        let easeFactor = current.easeFactor || 2.5;
+
+        if (quality >= 3) {
+          if (repetition === 0) interval = 1;
+          else if (repetition === 1) interval = 6;
+          else interval = Math.round(interval * easeFactor);
+          if (quality === 5) interval = Math.round(interval * 1.3);
+          repetition++;
+        } else {
+          repetition = 0;
+          interval = 0;
+        }
+
+        easeFactor = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+        if (easeFactor < 1.3) easeFactor = 1.3;
+
+        let nextReviewTime = Date.now();
+        if (interval === 0) {
+           nextReviewTime += 1 * 60 * 1000; // 忘記：1分鐘後
+        } else {
+           nextReviewTime += interval * 24 * 60 * 60 * 1000; // 答對：N天後
+        }
+
+        const updatedList = vocabList.map(v => v.word === current.word ? { ...v, repetition, interval, easeFactor, nextReview: nextReviewTime } : v);
+        setVocabList(updatedList);
+        
+        setInput('');
+        setIsRevealed(false);
+        setIsCorrect(null);
+        setCurrent(null);
+      };
+
+      return (
+        <div className="max-w-lg mx-auto pt-6 flex flex-col min-h-[60vh]">
+          <div className="flex justify-between items-center mb-8 px-2">
+            <span className="bg-indigo-100 text-indigo-700 font-bold px-3 py-1 rounded-full text-sm">今日剩餘：{dueCards.length}</span>
+            <span className="text-slate-400 text-sm font-medium">連續答對 {current.repetition || 0} 次</span>
+          </div>
+
+          <div className="text-center flex-1">
+            <p className="text-slate-500 font-bold uppercase tracking-wider mb-2">{current.pos}</p>
+            <h2 className="text-4xl font-black text-slate-800 mb-8">{current.zh}</h2>
+            
+            {!isRevealed ? (
+              <div className="space-y-4">
+                <input 
+                  type="text" autoFocus value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleCheck()} 
+                  className="w-full text-center text-3xl p-4 bg-white rounded-2xl shadow-sm outline-none border-2 border-transparent focus:border-indigo-400 transition-colors" 
+                  placeholder="請拼出英文..." 
+                />
+                <button onClick={handleCheck} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-lg hover:bg-slate-800">檢查答案</button>
+              </div>
+            ) : (
+              <div className="space-y-8 animate-fade-in">
+                <div className={`p-6 rounded-3xl border-2 ${isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                   <p className={`font-bold mb-1 ${isCorrect ? 'text-green-600' : 'text-red-500'}`}>{isCorrect ? '🎯 拼寫正確！' : '❌ 拼錯了！正確答案是：'}</p>
+                   <div className="flex justify-center items-center gap-3">
+                     <h3 className="text-4xl font-black text-slate-900">{current.word}</h3>
+                     <button onClick={() => playAudio(current.word)} className="p-2 bg-white rounded-full shadow-sm text-slate-600"><Icon name="Volume2" /></button>
+                   </div>
+                   <p className="text-slate-500 mt-2 font-mono">{current.ipa}</p>
                 </div>
                 
                 <div>
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">English Definition</h3>
-                  <p className="text-slate-700 leading-relaxed text-lg">{result.enDef}</p>
-                </div>
-
-                <div className="pt-4 border-t border-slate-100">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Context & Examples</h3>
-                  <div className="group border border-indigo-100 bg-indigo-50/30 rounded-2xl p-4 transition-colors">
-                    <div className="flex items-start gap-3">
-                      <button onClick={() => playAudio(result.exampleEn, settings.voice, settings.apiKey)} className="p-1.5 shrink-0 bg-white text-indigo-500 rounded-full shadow-sm hover:scale-110 transition-transform">
-                        <Volume1Icon size={18} />
-                      </button>
-                      <div>
-                        <p className="text-lg text-slate-800 leading-relaxed font-medium">
-                          {result.exampleEn.split(' ').map((w, i) => (
-                            <span key={i} onClick={() => handleInteractiveWordClick(w)} className="cursor-pointer hover:bg-indigo-200 hover:text-indigo-900 rounded px-0.5 transition-colors">
-                              {w}{' '}
-                            </span>
-                          ))}
-                        </p>
-                        <p className="text-slate-500 mt-2">{result.exampleZh}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // ==========================================
-    // 分頁元件: 我的單字庫 (Library)
-    // ==========================================
-    function LibraryTab({ vocabList, setVocabList, settings }) {
-      const [filter, setFilter] = useState('all');
-      
-      const toggleStar = (word) => setVocabList(prev => prev.map(v => v.word === word ? { ...v, starred: !v.starred } : v));
-      const toggleMastery = (word) => setVocabList(prev => prev.map(v => v.word === word ? { ...v, mastered: !v.mastered } : v));
-      const deleteWord = (word) => setVocabList(prev => prev.filter(v => v.word !== word));
-
-      const filteredList = vocabList.filter(v => {
-        if (filter === 'starred') return v.starred;
-        if (filter === 'unmastered') return !v.mastered;
-        return true;
-      }).sort((a, b) => b.addedAt - a.addedAt);
-
-      const masteryRate = vocabList.length === 0 ? 0 : Math.round((vocabList.filter(v => v.mastered).length / vocabList.length) * 100);
-
-      return (
-        <div className="max-w-3xl mx-auto space-y-6">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-            <div className="flex justify-between items-end mb-3">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">今日學習進度</h2>
-                <p className="text-sm text-slate-500">已熟記 {vocabList.filter(v => v.mastered).length} / {vocabList.length} 個單字</p>
-              </div>
-              <span className="text-3xl font-black text-indigo-600">{masteryRate}%</span>
-            </div>
-            <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-              <div className="bg-indigo-500 h-3 rounded-full transition-all duration-1000" style={{ width: `${masteryRate}%` }}></div>
-            </div>
-          </div>
-
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            <FilterBtn active={filter === 'all'} onClick={() => setFilter('all')} label="全部單字" />
-            <FilterBtn active={filter === 'starred'} onClick={() => setFilter('starred')} icon={<StarIcon size={16} fill={filter==='starred'?'currentColor':'none'}/>} label="星標重點" />
-            <FilterBtn active={filter === 'unmastered'} onClick={() => setFilter('unmastered')} icon={<BrainIcon size={16} />} label="尚未熟記" />
-          </div>
-
-          {filteredList.length === 0 ? (
-            <div className="text-center py-20 text-slate-400">
-              <BookIcon size={48} className="mx-auto mb-4 opacity-20" />
-              <p>這裡還空空的，去查詢新單字並加入吧！</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {filteredList.map((item) => (
-                <div key={item.word} className={`bg-white p-4 rounded-2xl shadow-sm border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${item.mastered ? 'border-green-100 bg-green-50/30' : 'border-slate-200 hover:border-indigo-200'}`}>
-                  <div className="flex items-start gap-4">
-                    <button onClick={() => playAudio(item.word, settings.voice, settings.apiKey)} className="p-2 mt-1 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-100 shrink-0">
-                      <Volume2Icon size={20} />
+                  <p className="text-slate-500 mb-3 text-sm font-bold">請誠實評估您的記憶程度：</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    <button onClick={() => handleRating(0)} className="flex flex-col items-center p-3 rounded-2xl bg-red-50 hover:bg-red-100 border border-red-100 transition-colors">
+                      <span className="text-red-600 font-bold mb-1">忘記</span>
+                      <span className="text-red-400 text-xs">1 分鐘</span>
                     </button>
-                    <div>
-                      <h3 className={`text-xl font-bold ${item.mastered ? 'text-slate-500' : 'text-slate-900'}`}>{item.word}</h3>
-                      <p className="text-sm text-slate-500 font-mono">{item.ipa} • <span className="italic">{item.pos}</span></p>
-                      <p className="text-slate-700 mt-1">{item.zh}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-end gap-3 w-full md:w-auto border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-                    <div className="flex gap-2">
-                      <ActionBtn onClick={() => toggleStar(item.word)} active={item.starred} activeClass="text-amber-500 bg-amber-50" defaultClass="text-slate-400 hover:bg-slate-100"><StarIcon size={20} fill={item.starred ? 'currentColor' : 'none'} /></ActionBtn>
-                      <ActionBtn onClick={() => toggleMastery(item.word)} active={item.mastered} activeClass="text-green-600 bg-green-100" defaultClass="text-slate-400 hover:bg-slate-100"><CheckCircleIcon size={20} /></ActionBtn>
-                      <ActionBtn onClick={() => deleteWord(item.word)} defaultClass="text-red-400 hover:bg-red-50"><Trash2Icon size={20} /></ActionBtn>
-                    </div>
+                    <button onClick={() => handleRating(3)} className="flex flex-col items-center p-3 rounded-2xl bg-orange-50 hover:bg-orange-100 border border-orange-100 transition-colors">
+                      <span className="text-orange-600 font-bold mb-1">困難</span>
+                      <span className="text-orange-400 text-xs">{calculateNextInterval(3)} 天</span>
+                    </button>
+                    <button onClick={() => handleRating(4)} className="flex flex-col items-center p-3 rounded-2xl bg-green-50 hover:bg-green-100 border border-green-100 transition-colors">
+                      <span className="text-green-600 font-bold mb-1">良好</span>
+                      <span className="text-green-400 text-xs">{calculateNextInterval(4)} 天</span>
+                    </button>
+                    <button onClick={() => handleRating(5)} className="flex flex-col items-center p-3 rounded-2xl bg-blue-50 hover:bg-blue-100 border border-blue-100 transition-colors">
+                      <span className="text-blue-600 font-bold mb-1">簡單</span>
+                      <span className="text-blue-400 text-xs">{calculateNextInterval(5)} 天</span>
+                    </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // ==========================================
-    // 分頁元件: 智能拼寫測驗 (Quiz)
-    // ==========================================
-    function QuizTab({ vocabList, setVocabList, settings }) {
-      const [currentWord, setCurrentWord] = useState(null);
-      const [input, setInput] = useState('');
-      const [status, setStatus] = useState('idle');
-      const inputRef = useRef(null);
-
-      const pickNextWord = useCallback(() => {
-        if (vocabList.length === 0) return null;
-        const candidates = vocabList.map(item => {
-          let weight = item.mastered ? 0.1 : Math.exp((item.attempts === 0 ? 0.5 : item.errors / item.attempts) * 3);
-          if (item.starred) weight *= 1.5;
-          return { ...item, weight };
-        });
-        const totalWeight = candidates.reduce((sum, item) => sum + item.weight, 0);
-        let randomNum = Math.random() * totalWeight;
-        for (const item of candidates) {
-          randomNum -= item.weight;
-          if (randomNum <= 0) return item;
-        }
-        return candidates[0];
-      }, [vocabList]);
-
-      useEffect(() => {
-        if (!currentWord && vocabList.length > 0) nextQuestion();
-      }, [vocabList.length]);
-
-      const nextQuestion = () => {
-        setCurrentWord(pickNextWord());
-        setInput('');
-        setStatus('idle');
-      };
-
-      const checkAnswer = () => {
-        if (!currentWord || !input.trim()) return;
-        const isCorrect = input.trim().toLowerCase() === currentWord.word.toLowerCase();
-        
-        setVocabList(prev => prev.map(v => v.word === currentWord.word ? { ...v, attempts: v.attempts + 1, errors: isCorrect ? v.errors : v.errors + 1 } : v));
-        setStatus(isCorrect ? 'correct' : 'incorrect');
-        
-        if (isCorrect) {
-          playAudio(currentWord.word, settings.voice, settings.apiKey);
-          setTimeout(() => nextQuestion(), 1200);
-        }
-      };
-
-      if (vocabList.length === 0) return (
-        <div className="flex flex-col items-center justify-center h-full text-slate-500 pb-20">
-          <BrainIcon size={64} className="opacity-20 mb-4" />
-          <p>單字庫為空，請先前往查詢並加入單字！</p>
-        </div>
-      );
-
-      if (!currentWord) return null;
-
-      return (
-        <div className="max-w-lg mx-auto h-full flex flex-col justify-center pb-10">
-          <div className="text-center mb-6">
-            <span className="inline-block bg-indigo-100 text-indigo-700 px-4 py-1.5 rounded-full text-sm font-bold tracking-widest uppercase">Spelling Quiz</span>
-          </div>
-          <div className={`relative bg-white rounded-3xl p-6 md:p-10 shadow-lg border-2 transition-all ${status === 'idle' ? 'border-transparent' : status === 'correct' ? 'border-green-400 bg-green-50/30' : 'border-red-400 bg-red-50/10'}`}>
-            <div className="text-center mb-8">
-              <p className="text-slate-400 font-medium italic mb-2">{currentWord.pos}</p>
-              <h2 className="text-3xl font-black text-slate-800">{currentWord.zh}</h2>
-              <button onClick={() => playAudio(currentWord.word, settings.voice, settings.apiKey)} className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-100"><Volume2Icon size={18} /> 聽音辨字</button>
-            </div>
-            <div className="relative">
-              <input
-                ref={inputRef}
-                type="text" value={input} onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (status === 'idle' ? checkAnswer() : nextQuestion())}
-                disabled={status !== 'idle'} placeholder="請拼出英文單字..."
-                autoComplete="off" autoCorrect="off" spellCheck="false"
-                className={`w-full text-center text-2xl font-bold p-4 rounded-xl outline-none transition-all ${status === 'idle' ? 'bg-slate-100 focus:bg-white focus:ring-4 focus:ring-indigo-100' : status === 'correct' ? 'bg-transparent text-green-700' : 'bg-transparent text-red-600 line-through opacity-60'}`}
-              />
-              {status === 'correct' && <CheckCircleIcon className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500" size={28} />}
-              {status === 'incorrect' && <XCircleIcon className="absolute right-4 top-1/2 -translate-y-1/2 text-red-500" size={28} />}
-            </div>
-            {status === 'incorrect' && (
-              <div className="mt-6 p-5 bg-white rounded-2xl border border-red-100 shadow-sm animate-in fade-in">
-                <p className="text-sm font-bold text-red-400 uppercase mb-1">Correct Answer</p>
-                <div className="flex items-center gap-3 mb-4">
-                  <p className="text-3xl font-black text-slate-900">{currentWord.word}</p>
-                  <button onClick={() => playAudio(currentWord.word, settings.voice, settings.apiKey)} className="p-1.5 bg-indigo-50 text-indigo-600 rounded-full"><Volume2Icon size={20}/></button>
-                </div>
-                <div className="bg-slate-50 p-3 rounded-lg"><p className="text-sm font-medium">{currentWord.exampleEn}</p><p className="text-slate-500 text-sm mt-1">{currentWord.exampleZh}</p></div>
               </div>
             )}
-            <div className="mt-8">
-              {status === 'idle' ? (
-                <button onClick={checkAnswer} className="bg-indigo-600 text-white w-full py-4 rounded-xl font-bold text-lg hover:bg-indigo-700">送出檢查 (Enter)</button>
-              ) : (
-                <button onClick={nextQuestion} className="bg-slate-900 text-white w-full py-4 rounded-xl font-bold text-lg flex justify-center gap-2">下一題 <ChevronRightIcon size={20} /></button>
-              )}
-            </div>
           </div>
         </div>
       );
     }
 
     // ==========================================
-    // 分頁元件: 設定 (Settings)
+    // 設定 (Settings)
     // ==========================================
     function SettingsTab({ settings, setSettings }) {
-      const [inputKey, setInputKey] = useState(settings.apiKey || '');
-      const [showSuccess, setShowSuccess] = useState(false);
-
-      const handleSaveKey = () => {
-        setSettings({ ...settings, apiKey: inputKey.trim() });
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 2000);
-      };
-
+      const [tempKey, setTempKey] = useState(settings.apiKey);
       return (
-        <div className="max-w-2xl mx-auto space-y-8 pb-10">
-          {/* API Key 設定區塊 (安全地儲存在本機) */}
+        <div className="max-w-2xl mx-auto">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-2">
-              <KeyIcon className="text-amber-500" /> API 金鑰綁定
-            </h2>
-            <p className="text-sm text-slate-500 mb-6">為確保安全，請輸入您的 Gemini API Key。此金鑰僅會儲存在您的本機瀏覽器 (Local Storage) 中，不會外洩上傳。</p>
-            
-            <div className="flex flex-col gap-3">
-              <input 
-                type="password" 
-                value={inputKey}
-                onChange={(e) => setInputKey(e.target.value)}
-                placeholder="請輸入 AIzaSy... 開頭的金鑰"
-                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm"
-              />
-              <button 
-                onClick={handleSaveKey}
-                className="bg-slate-900 text-white px-6 py-3 rounded-xl font-medium hover:bg-slate-800 transition-colors w-full sm:w-auto"
-              >
-                {showSuccess ? "儲存成功！" : "儲存金鑰"}
-              </button>
-            </div>
-            {settings.apiKey && !showSuccess && <p className="text-green-600 text-sm mt-3 flex items-center gap-1"><CheckCircleIcon size={14}/> 系統已綁定金鑰，功能可正常運作</p>}
-          </div>
-
-          {/* 其他設定 */}
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-             <h3 className="font-bold text-slate-800 mb-2">關於演算法與發音</h3>
-             <p className="text-slate-500 text-sm mb-2">AuraVocab 採用自適應錯誤率演算法，錯誤率越高的單字會越常出現。發音部分則全面優化使用「裝置原生發音引擎」，確保離線與行動網路下皆能零延遲出聲。</p>
+            <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Icon name="Key" className="text-indigo-500"/> API Key 安全綁定</h2>
+            <p className="text-sm text-slate-500 mb-4">請貼上您的 Gemini API Key。這把金鑰只會加密儲存於您手機的瀏覽器中，絕對安全，不會上傳到任何公開伺服器。</p>
+            <input type="password" value={tempKey} onChange={e=>setTempKey(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 outline-none focus:border-indigo-500" placeholder="AIzaSy..." />
+            <button onClick={() => {setSettings({...settings, apiKey: tempKey}); alert('金鑰已安全儲存！');}} className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl">儲存金鑰</button>
           </div>
         </div>
       );
     }
 
     // ==========================================
-    // 共用微型元件 (UI Components)
+    // UI 元件
     // ==========================================
     function NavItem({ active, onClick, icon, label, badge }) {
       return (
         <button onClick={onClick} className={`w-full flex items-center justify-between p-3 rounded-xl ${active ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}>
-          <div className="flex items-center gap-3">{icon} <span>{label}</span></div>
-          {badge !== undefined && <span className="bg-indigo-100 text-indigo-700 text-xs py-0.5 px-2 rounded-full font-bold">{badge}</span>}
+          <div className="flex items-center gap-3"><Icon name={icon} size={20} /> <span>{label}</span></div>
+          {badge !== undefined && <span className="bg-indigo-500 text-white text-xs py-0.5 px-2 rounded-full font-bold">{badge}</span>}
         </button>
       );
     }
 
-    function MobileNavItem({ active, onClick, icon, label }) {
+    function MobileNavItem({ active, onClick, icon, label, badge }) {
       return (
-        <button onClick={onClick} className={`flex flex-col items-center justify-center p-2 min-w-[64px] ${active ? 'text-indigo-600' : 'text-slate-400'}`}>
-          <div className={`mb-1 ${active ? 'scale-110' : ''}`}>{icon}</div>
-          <span className="text-[10px] font-medium">{label}</span>
+        <button onClick={onClick} className={`relative flex flex-col items-center justify-center p-2 min-w-[64px] ${active ? 'text-indigo-600' : 'text-slate-400'}`}>
+          <div className={`mb-1 ${active ? 'scale-110' : ''}`}><Icon name={icon} size={24} /></div>
+          <span className="text-[11px] font-bold tracking-wide">{label}</span>
+          {badge !== undefined && <span className="absolute top-1 right-2 bg-indigo-500 text-white text-[10px] font-bold px-1.5 rounded-full">{badge}</span>}
         </button>
       );
     }
 
-    function FilterBtn({ active, onClick, icon, label }) {
-      return <button onClick={onClick} className={`whitespace-nowrap flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold ${active ? 'bg-slate-800 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}>{icon} {label}</button>;
-    }
-
-    function ActionBtn({ children, onClick, active, activeClass, defaultClass }) {
-      return <button onClick={onClick} className={`p-2 rounded-xl transition-colors ${active ? activeClass : defaultClass}`}>{children}</button>;
-    }
-
-    // --- 啟動 React ---
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
