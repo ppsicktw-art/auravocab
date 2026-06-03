@@ -22,6 +22,8 @@
     /* 隱藏滾動條但保留滾動功能 */
     .scrollbar-hide::-webkit-scrollbar { display: none; }
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    /* 防止手機點擊輸入框時自動放大畫面 */
+    input, textarea { font-size: 16px !important; }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
@@ -32,7 +34,7 @@
     const { useState, useEffect, useRef, useCallback } = React;
 
     // --- 圖示元件模擬 (SVG 替代) ---
-    const Icon = ({ name, size = 24, className = "" }) => {
+    const Icon = ({ name, size = 24, className = "", fill = "none" }) => {
       const svgRef = useRef(null);
       useEffect(() => {
         if (svgRef.current && window.lucide) {
@@ -43,7 +45,7 @@
           });
         }
       }, [name]);
-      return <span ref={svgRef}><i data-lucide={name} width={size} height={size} className={className}></i></span>;
+      return <span ref={svgRef}><i data-lucide={name} width={size} height={size} className={className} style={{fill: fill}}></i></span>;
     };
 
     const SearchIcon = (p) => <Icon name="Search" {...p}/>;
@@ -61,15 +63,13 @@
     const SparklesIcon = (p) => <Icon name="Sparkles" {...p}/>;
     const XCircleIcon = (p) => <Icon name="XCircle" {...p}/>;
     const CheckIcon = (p) => <Icon name="Check" {...p}/>;
+    const KeyIcon = (p) => <Icon name="Key" {...p}/>;
 
     // ==========================================
     // 系統全域設定與 API 參數
     // ==========================================
-    
-    // ⚠️ 請在這裡貼上您的 API Key！
-    const apiKey = ""; 
-    
-    const TEXT_MODEL = "gemini-2.5-flash"; // 使用最穩定的模型
+    const TEXT_MODEL = "gemini-2.5-flash"; 
+    const TTS_MODEL = "gemini-2.5-flash"; // 可視情況改用 gemini-2.5-flash 語音
 
     const fetchWithRetry = async (url, options, maxRetries = 5) => {
       let delays = [1000, 2000, 4000, 8000, 16000];
@@ -77,21 +77,21 @@
         try {
           const response = await fetch(url, options);
           if (!response.ok) {
-            // 將原本直接報錯的機制做攔截
-            throw new Error(`HTTP error! status: ${response.status}`);
+             throw new Error(`HTTP error! status: ${response.status}`);
           }
           return await response.json();
         } catch (error) {
-          if (error.message.includes('429')) throw error; // 如果是 429 就不用退避重試了，直接拋出
+          if (error.message.includes('429') || error.message.includes('400')) throw error; 
           if (i === maxRetries - 1) throw error;
           await new Promise(res => setTimeout(res, delays[i]));
         }
       }
     };
 
-    // 穩定的原生語音發音機制 (防跨網域阻擋)
-    const playAudio = (text, voice = "Google US English") => {
+    const playAudio = (text, voice, apiKey) => {
       if (!text) return;
+      
+      // 目前網頁端呼叫 Gemini TTS 容易遇到 CORS，故統一降級為裝置原生語音，確保發音順暢零延遲
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
       window.speechSynthesis.speak(utterance);
@@ -105,30 +105,18 @@
     function App() {
       const [activeTab, setActiveTab] = useState('search');
       
+      // 自動讀取字庫與設定 (包含 API Key)
       const [vocabList, setVocabList] = useState(() => {
         const savedData = localStorage.getItem('auraVocab_list');
-        if (savedData) {
-          try {
-            return JSON.parse(savedData);
-          } catch (e) {
-            console.error("讀取存檔失敗", e);
-          }
-        }
-        return MOCK_VOCAB; // 如果沒有存檔，才顯示預設單字
+        return savedData ? JSON.parse(savedData) : MOCK_VOCAB;
       });
 
       const [settings, setSettings] = useState(() => {
         const savedSettings = localStorage.getItem('auraVocab_settings');
-        if (savedSettings) {
-          try {
-            return JSON.parse(savedSettings);
-          } catch (e) {
-            console.error("讀取設定失敗", e);
-          }
-        }
-        return { voice: 'Native' };
+        return savedSettings ? JSON.parse(savedSettings) : { voice: 'Native', apiKey: '' };
       });
 
+      // 自動存檔
       useEffect(() => {
         localStorage.setItem('auraVocab_list', JSON.stringify(vocabList));
       }, [vocabList]);
@@ -152,6 +140,7 @@
               <NavItem active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon={<SearchIcon size={20} />} label="智慧查詢" />
               <NavItem active={activeTab === 'library'} onClick={() => setActiveTab('library')} icon={<BookIcon size={20} />} label="我的單字庫" badge={vocabList.length} />
               <NavItem active={activeTab === 'quiz'} onClick={() => setActiveTab('quiz')} icon={<BrainIcon size={20} />} label="拼寫測驗" />
+              <NavItem active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={<SettingsIcon size={20} />} label="設定" />
             </nav>
           </aside>
 
@@ -164,18 +153,20 @@
               <h1 className="text-lg font-bold">AuraVocab</h1>
             </header>
             
-            <div className="flex-1 overflow-y-auto p-4 md:p-8">
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-32">
               {activeTab === 'search' && <SearchTab vocabList={vocabList} setVocabList={setVocabList} settings={settings} />}
               {activeTab === 'library' && <LibraryTab vocabList={vocabList} setVocabList={setVocabList} settings={settings} />}
               {activeTab === 'quiz' && <QuizTab vocabList={vocabList} setVocabList={setVocabList} settings={settings} />}
+              {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} />}
             </div>
           </main>
 
-          {/* 手機版大拇指底部導覽列 (特別墊高 pb-[60px] 避開 Tiiny 廣告) */}
-          <nav className="md:hidden shrink-0 bg-white border-t border-slate-200 flex justify-around px-2 pt-2 pb-[calc(60px+env(safe-area-inset-bottom))] shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] relative z-20">
+          {/* 手機版大拇指底部導覽列 (特別墊高 pb-[calc(1rem+env(safe-area-inset-bottom))] 確保不被橫條擋住) */}
+          <nav className="md:hidden shrink-0 bg-white border-t border-slate-200 flex justify-around px-2 pt-2 pb-[calc(20px+env(safe-area-inset-bottom))] shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] absolute bottom-0 left-0 right-0 z-20">
             <MobileNavItem active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon={<SearchIcon size={22} />} label="查詢" />
             <MobileNavItem active={activeTab === 'library'} onClick={() => setActiveTab('library')} icon={<BookIcon size={22} />} label="字庫" />
             <MobileNavItem active={activeTab === 'quiz'} onClick={() => setActiveTab('quiz')} icon={<BrainIcon size={22} />} label="測驗" />
+            <MobileNavItem active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={<SettingsIcon size={22} />} label="設定" />
           </nav>
         </div>
       );
@@ -200,7 +191,10 @@
         setResult(null);
 
         try {
-          if(!apiKey) throw new Error("您尚未填寫 API Key 喔！");
+          // 動態檢查有沒有輸入 API Key
+          if(!settings.apiKey) {
+             throw new Error("尚未綁定 API 金鑰！請先至下方「設定」分頁填寫您的 Gemini API Key。");
+          }
 
           const prompt = `You are an expert bilingual dictionary (English to Traditional Chinese). Analyze the English word: "${targetWord}".
           Provide a detailed JSON response exactly following this structure, no markdown or comments:
@@ -219,7 +213,7 @@
             generationConfig: { responseMimeType: "application/json" }
           };
 
-          const data = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`, {
+          const data = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${settings.apiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -231,12 +225,13 @@
           const parsed = JSON.parse(jsonText);
           setResult(parsed);
           
-          playAudio(parsed.word, settings.voice);
+          playAudio(parsed.word, settings.voice, settings.apiKey);
 
         } catch (err) {
-          // 🛑 攔截 429 錯誤，改顯示友善的中文提示
           if (err.message.includes('429')) {
-             setError("⚠️ 查詢次數太頻繁囉！系統需要喘口氣，請休息 1 到 2 分鐘後再試。");
+             setError("⚠️ 查詢次數太頻繁囉！系統受到限制，請休息 1 到 2 分鐘後再試。");
+          } else if (err.message.includes('400')) {
+             setError("⚠️ API 金鑰無效或模型名稱錯誤，請至「設定」檢查。");
           } else {
              setError(err.message || "查詢失敗，請稍後再試。");
           }
@@ -300,12 +295,12 @@
           )}
 
           {result && !loading && (
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 animate-in fade-in duration-500">
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <div className="flex items-center gap-3">
                     <h2 className="text-4xl font-black text-slate-900 tracking-tight">{result.word}</h2>
-                    <button onClick={() => playAudio(result.word, settings.voice)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors">
+                    <button onClick={() => playAudio(result.word, settings.voice, settings.apiKey)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors">
                       <Volume2Icon size={24} />
                     </button>
                   </div>
@@ -333,9 +328,9 @@
 
                 <div className="pt-4 border-t border-slate-100">
                   <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Context & Examples</h3>
-                  <div className="group border border-indigo-100 bg-indigo-50/30 rounded-2xl p-4 transition-colors hover:bg-indigo-50/60">
+                  <div className="group border border-indigo-100 bg-indigo-50/30 rounded-2xl p-4 transition-colors">
                     <div className="flex items-start gap-3">
-                      <button onClick={() => playAudio(result.exampleEn, settings.voice)} className="p-1.5 shrink-0 bg-white text-indigo-500 rounded-full shadow-sm hover:scale-110 transition-transform">
+                      <button onClick={() => playAudio(result.exampleEn, settings.voice, settings.apiKey)} className="p-1.5 shrink-0 bg-white text-indigo-500 rounded-full shadow-sm hover:scale-110 transition-transform">
                         <Volume1Icon size={18} />
                       </button>
                       <div>
@@ -393,7 +388,7 @@
 
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
             <FilterBtn active={filter === 'all'} onClick={() => setFilter('all')} label="全部單字" />
-            <FilterBtn active={filter === 'starred'} onClick={() => setFilter('starred')} icon={<StarIcon size={16} />} label="星標重點" />
+            <FilterBtn active={filter === 'starred'} onClick={() => setFilter('starred')} icon={<StarIcon size={16} fill={filter==='starred'?'currentColor':'none'}/>} label="星標重點" />
             <FilterBtn active={filter === 'unmastered'} onClick={() => setFilter('unmastered')} icon={<BrainIcon size={16} />} label="尚未熟記" />
           </div>
 
@@ -407,7 +402,7 @@
               {filteredList.map((item) => (
                 <div key={item.word} className={`bg-white p-4 rounded-2xl shadow-sm border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${item.mastered ? 'border-green-100 bg-green-50/30' : 'border-slate-200 hover:border-indigo-200'}`}>
                   <div className="flex items-start gap-4">
-                    <button onClick={() => playAudio(item.word, settings.voice)} className="p-2 mt-1 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-100 shrink-0">
+                    <button onClick={() => playAudio(item.word, settings.voice, settings.apiKey)} className="p-2 mt-1 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-100 shrink-0">
                       <Volume2Icon size={20} />
                     </button>
                     <div>
@@ -418,7 +413,7 @@
                   </div>
                   <div className="flex items-center justify-end gap-3 w-full md:w-auto border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
                     <div className="flex gap-2">
-                      <ActionBtn onClick={() => toggleStar(item.word)} active={item.starred} activeClass="text-amber-500 bg-amber-50" defaultClass="text-slate-400 hover:bg-slate-100"><StarIcon size={20} className={item.starred ? "fill-amber-500" : ""} /></ActionBtn>
+                      <ActionBtn onClick={() => toggleStar(item.word)} active={item.starred} activeClass="text-amber-500 bg-amber-50" defaultClass="text-slate-400 hover:bg-slate-100"><StarIcon size={20} fill={item.starred ? 'currentColor' : 'none'} /></ActionBtn>
                       <ActionBtn onClick={() => toggleMastery(item.word)} active={item.mastered} activeClass="text-green-600 bg-green-100" defaultClass="text-slate-400 hover:bg-slate-100"><CheckCircleIcon size={20} /></ActionBtn>
                       <ActionBtn onClick={() => deleteWord(item.word)} defaultClass="text-red-400 hover:bg-red-50"><Trash2Icon size={20} /></ActionBtn>
                     </div>
@@ -474,7 +469,7 @@
         setStatus(isCorrect ? 'correct' : 'incorrect');
         
         if (isCorrect) {
-          playAudio(currentWord.word, settings.voice);
+          playAudio(currentWord.word, settings.voice, settings.apiKey);
           setTimeout(() => nextQuestion(), 1200);
         }
       };
@@ -497,7 +492,7 @@
             <div className="text-center mb-8">
               <p className="text-slate-400 font-medium italic mb-2">{currentWord.pos}</p>
               <h2 className="text-3xl font-black text-slate-800">{currentWord.zh}</h2>
-              <button onClick={() => playAudio(currentWord.word, settings.voice)} className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-100"><Volume2Icon size={18} /> 聽音辨字</button>
+              <button onClick={() => playAudio(currentWord.word, settings.voice, settings.apiKey)} className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-100"><Volume2Icon size={18} /> 聽音辨字</button>
             </div>
             <div className="relative">
               <input
@@ -516,7 +511,7 @@
                 <p className="text-sm font-bold text-red-400 uppercase mb-1">Correct Answer</p>
                 <div className="flex items-center gap-3 mb-4">
                   <p className="text-3xl font-black text-slate-900">{currentWord.word}</p>
-                  <button onClick={() => playAudio(currentWord.word, settings.voice)} className="p-1.5 bg-indigo-50 text-indigo-600 rounded-full"><Volume2Icon size={20}/></button>
+                  <button onClick={() => playAudio(currentWord.word, settings.voice, settings.apiKey)} className="p-1.5 bg-indigo-50 text-indigo-600 rounded-full"><Volume2Icon size={20}/></button>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg"><p className="text-sm font-medium">{currentWord.exampleEn}</p><p className="text-slate-500 text-sm mt-1">{currentWord.exampleZh}</p></div>
               </div>
@@ -528,6 +523,55 @@
                 <button onClick={nextQuestion} className="bg-slate-900 text-white w-full py-4 rounded-xl font-bold text-lg flex justify-center gap-2">下一題 <ChevronRightIcon size={20} /></button>
               )}
             </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 分頁元件: 設定 (Settings)
+    // ==========================================
+    function SettingsTab({ settings, setSettings }) {
+      const [inputKey, setInputKey] = useState(settings.apiKey || '');
+      const [showSuccess, setShowSuccess] = useState(false);
+
+      const handleSaveKey = () => {
+        setSettings({ ...settings, apiKey: inputKey.trim() });
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 2000);
+      };
+
+      return (
+        <div className="max-w-2xl mx-auto space-y-8 pb-10">
+          {/* API Key 設定區塊 (安全地儲存在本機) */}
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-2">
+              <KeyIcon className="text-amber-500" /> API 金鑰綁定
+            </h2>
+            <p className="text-sm text-slate-500 mb-6">為確保安全，請輸入您的 Gemini API Key。此金鑰僅會儲存在您的本機瀏覽器 (Local Storage) 中，不會外洩上傳。</p>
+            
+            <div className="flex flex-col gap-3">
+              <input 
+                type="password" 
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder="請輸入 AIzaSy... 開頭的金鑰"
+                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm"
+              />
+              <button 
+                onClick={handleSaveKey}
+                className="bg-slate-900 text-white px-6 py-3 rounded-xl font-medium hover:bg-slate-800 transition-colors w-full sm:w-auto"
+              >
+                {showSuccess ? "儲存成功！" : "儲存金鑰"}
+              </button>
+            </div>
+            {settings.apiKey && !showSuccess && <p className="text-green-600 text-sm mt-3 flex items-center gap-1"><CheckCircleIcon size={14}/> 系統已綁定金鑰，功能可正常運作</p>}
+          </div>
+
+          {/* 其他設定 */}
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+             <h3 className="font-bold text-slate-800 mb-2">關於演算法與發音</h3>
+             <p className="text-slate-500 text-sm mb-2">AuraVocab 採用自適應錯誤率演算法，錯誤率越高的單字會越常出現。發音部分則全面優化使用「裝置原生發音引擎」，確保離線與行動網路下皆能零延遲出聲。</p>
           </div>
         </div>
       );
