@@ -71,6 +71,7 @@
     // ==========================================
     function App() {
       const [activeTab, setActiveTab] = useState('search');
+      const [searchTriggerWord, setSearchTriggerWord] = useState(''); // 用來傳遞點擊的單字
       
       const [vocabList, setVocabList] = useState(() => {
         const saved = localStorage.getItem('auraVocabList');
@@ -93,6 +94,15 @@
       };
 
       const dueCount = vocabList.filter(v => !v.mastered && v.nextReview <= Date.now()).length;
+
+      // 當點擊例句單字時觸發
+      const handleWordClick = (word) => {
+        const cleanWord = word.replace(/[^a-zA-Z'-]/g, ''); // 去除標點符號，保留字母和連字符
+        if (cleanWord) {
+          setSearchTriggerWord(cleanWord);
+          setActiveTab('search');
+        }
+      };
 
       if (!settings.apiKey && activeTab !== 'settings') {
         return (
@@ -131,9 +141,9 @@
             </header>
             
             <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
-              {activeTab === 'search' && <SearchTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} />}
+              {activeTab === 'search' && <SearchTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} searchTriggerWord={searchTriggerWord} clearTrigger={() => setSearchTriggerWord('')} />}
               {activeTab === 'vision' && <VisionTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} />}
-              {activeTab === 'library' && <LibraryTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} />}
+              {activeTab === 'library' && <LibraryTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} onWordClick={handleWordClick} />}
               {activeTab === 'quiz' && <QuizTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} />}
               {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} />}
             </div>
@@ -325,14 +335,23 @@
     // ==========================================
     // 智慧查詢 (Search) - 精簡版 (取消例句與英文定義)
     // ==========================================
-    function SearchTab({ vocabList, setVocabList, apiKey, playAudio }) {
+    function SearchTab({ vocabList, setVocabList, apiKey, playAudio, searchTriggerWord, clearTrigger }) {
       const [query, setQuery] = useState('');
       const [loading, setLoading] = useState(false);
       const [result, setResult] = useState(null);
       const [error, setError] = useState(null);
 
-      const searchWord = async () => {
-        const targetWord = query.trim().toLowerCase();
+      // 當點擊例句單字跳轉過來時，自動觸發查詢
+      useEffect(() => {
+        if (searchTriggerWord) {
+          setQuery(searchTriggerWord);
+          searchWord(searchTriggerWord);
+          clearTrigger();
+        }
+      }, [searchTriggerWord]);
+
+      const searchWord = async (wordToSearch = query) => {
+        const targetWord = wordToSearch.trim().toLowerCase();
         if (!targetWord) return;
         setLoading(true); setError(null); setResult(null);
 
@@ -362,7 +381,7 @@
           <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex items-center">
             <Icon name="Search" className="text-slate-400 mx-3" size={20} />
             <input type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchWord()} placeholder="輸入單字查詢..." className="flex-1 bg-transparent outline-none p-2 text-lg" />
-            <button onClick={searchWord} disabled={loading} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold disabled:opacity-50">查詢</button>
+            <button onClick={() => searchWord()} disabled={loading} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold disabled:opacity-50">查詢</button>
           </div>
           {loading && <div className="text-center py-10 text-indigo-500"><Icon name="Loader2" className="animate-spin mx-auto mb-2" size={32}/>分析中...</div>}
           {error && <div className="p-4 bg-red-50 text-red-600 rounded-xl flex items-center gap-2"><Icon name="AlertCircle" /> {error}</div>}
@@ -393,7 +412,7 @@
     // ==========================================
     // 我的單字庫 (Library) - 新增例句與專屬喇叭
     // ==========================================
-    function LibraryTab({ vocabList, setVocabList, playAudio }) {
+    function LibraryTab({ vocabList, setVocabList, playAudio, onWordClick }) {
       const toggleProperty = (word, prop) => setVocabList(prev => prev.map(v => v.word === word ? { ...v, [prop]: !v[prop] } : v));
       const deleteWord = (word) => setVocabList(prev => prev.filter(v => v.word !== word));
 
@@ -424,7 +443,17 @@
                           <Icon name="Volume1" size={16} />
                         </button>
                         <div>
-                          <p className="text-slate-800 font-medium leading-relaxed">{item.exampleEn}</p>
+                          <p className="text-slate-800 font-medium leading-relaxed">
+                            {item.exampleEn.split(' ').map((word, i) => (
+                              <span 
+                                key={i} 
+                                onClick={() => onWordClick(word)} 
+                                className="cursor-pointer hover:bg-indigo-200 hover:text-indigo-900 rounded px-0.5 transition-colors"
+                              >
+                                {word}{' '}
+                              </span>
+                            ))}
+                          </p>
                           <p className="text-slate-500 text-sm mt-1">{item.exampleZh}</p>
                         </div>
                       </div>
