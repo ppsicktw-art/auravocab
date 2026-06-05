@@ -68,8 +68,15 @@
       return match ? match[0] : str;
     };
 
+    // 判別是單字還是片語的 Helper
+    const isPhrase = (item) => {
+      return (item.word && item.word.trim().includes(' ')) || 
+             (item.pos && (item.pos.toLowerCase().includes('phrase') || item.pos.toLowerCase().includes('idiom')));
+    };
+
     const MOCK_VOCAB = [
-      initAnkiParams({ word: "resilience", ipa: "/rɪˈzɪliəns/", pos: "noun", zh: "韌性；恢復力", exampleEn: "She showed great resilience in the face of adversity.", exampleZh: "她在逆境中展現了極大的韌性。" })
+      initAnkiParams({ word: "resilience", ipa: "/rɪˈzɪliəns/", pos: "noun", zh: "韌性；恢復力", exampleEn: "She showed great resilience in the face of adversity.", exampleZh: "她在逆境中展現了極大的韌性。" }),
+      initAnkiParams({ word: "off limits", ipa: "", pos: "phrase", zh: "不被允許的、禁止的", exampleEn: "Talking about religion is off limits in my family.", exampleZh: "談論信仰在我家是禁止的。" })
     ];
 
     // ==========================================
@@ -77,7 +84,7 @@
     // ==========================================
     function App() {
       const [activeTab, setActiveTab] = useState('search');
-      const [searchTriggerWord, setSearchTriggerWord] = useState(''); // 用來傳遞點擊的單字
+      const [searchTriggerWord, setSearchTriggerWord] = useState(''); 
       const [toast, setToast] = useState(null);
       
       const [vocabList, setVocabList] = useState(() => {
@@ -100,10 +107,10 @@
 
       const playAudio = (text) => {
         if (!text) return;
-        window.speechSynthesis.cancel(); // 防止死鎖排隊
+        window.speechSynthesis.cancel(); 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'en-US';
-        utterance.rate = 0.85; // 稍微放慢發音
+        utterance.rate = 0.85; 
         window.speechSynthesis.speak(utterance);
       };
 
@@ -111,7 +118,6 @@
 
       // 點擊例句單字時觸發即點即查
       const handleWordClick = (word) => {
-        // 清除頭尾標點符號，保留單字本體
         const cleanWord = word.replace(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘]+/g, "").replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'”’]+$/g, "");
         if (cleanWord) {
           setSearchTriggerWord(cleanWord);
@@ -192,7 +198,7 @@
     }
 
     // ==========================================
-    // 1. 智慧查詢 (SearchTab) - 省錢版 Prompt (隱藏例句與英英定義)
+    // 1. 智慧查詢 (SearchTab) - 支援單字與片語辨識
     // ==========================================
     function SearchTab({ vocabList, setVocabList, apiKey, playAudio, searchTriggerWord, clearTrigger, showToast }) {
       const [query, setQuery] = useState('');
@@ -200,7 +206,6 @@
       const [result, setResult] = useState(null);
       const [error, setError] = useState(null);
 
-      // 當點擊例句單字跳轉過來時，自動觸發查詢
       useEffect(() => {
         if (searchTriggerWord) {
           setQuery(searchTriggerWord);
@@ -215,9 +220,9 @@
         setLoading(true); setError(null); setResult(null);
 
         try {
-          // 修改 Prompt 移除 enDef (英英定義) 減少流量消耗，且不要求複雜的延伸說明
+          // 修改 Prompt 使其能精準解析「單字」與「片語」
           const prompt = `Analyze the English word or phrase: "${targetWord}". 
-          Provide JSON response: {"word": "exact word/phrase lowercase", "ipa": "IPA pronunciation", "pos": "part of speech", "zh": "Traditional Chinese translation", "exampleEn": "Simple practical context sentence", "exampleZh": "Traditional Chinese translation of example"}`;
+          Provide JSON response: {"word": "exact word/phrase lowercase", "ipa": "IPA pronunciation (leave blank if it is a phrase)", "pos": "part of speech (write 'phrase' if it is an idiom/collocation/phrase)", "zh": "Traditional Chinese translation", "exampleEn": "Simple practical context sentence", "exampleZh": "Traditional Chinese translation of example"}`;
           
           const payload = { 
             contents: [{ parts: [{ text: prompt }] }], 
@@ -226,7 +231,7 @@
           
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`, { 
             method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, // FIXED: 補上此 Content-Type 防止 JSON payload 錯誤
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload) 
           });
 
@@ -259,7 +264,7 @@
         <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
           <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex items-center">
             <Icon name="Search" className="text-slate-400 mx-3" size={20} />
-            <input type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchWord()} placeholder="輸入單字查詢..." className="flex-1 bg-transparent outline-none p-2 text-lg" />
+            <input type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchWord()} placeholder="輸入單字或片語查詢..." className="flex-1 bg-transparent outline-none p-2 text-lg" />
             <button onClick={() => searchWord()} disabled={loading} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold disabled:opacity-50">查詢</button>
           </div>
           {loading && <div className="text-center py-10 text-indigo-500"><Icon name="Loader2" className="animate-spin mx-auto mb-2" size={32}/>分析中...</div>}
@@ -269,10 +274,13 @@
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <div className="flex items-center gap-3">
-                    <h2 className="text-4xl font-black text-slate-900">{result.word}</h2>
+                    <h2 className="text-4xl font-black text-slate-900 leading-tight">{result.word}</h2>
                     <button onClick={() => playAudio(result.word)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full active:scale-95 transition-transform"><Icon name="Volume2" /></button>
                   </div>
-                  <p className="text-slate-500 mt-2 font-mono">{result.ipa} • <span className="text-indigo-500 italic">{result.pos}</span></p>
+                  <p className="text-slate-500 mt-2 font-mono">
+                    {result.ipa && `${result.ipa} • `}
+                    <span className="text-indigo-500 italic">{result.pos}</span>
+                  </p>
                 </div>
                 <button onClick={saveWord} disabled={isSaved} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold ${isSaved ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-slate-900 text-white active:scale-95 transition-transform'}`}>
                   {isSaved ? <><Icon name="CheckCircle" size={18}/> 已收藏</> : <><Icon name="Book" size={18}/> 收藏</>}
@@ -289,7 +297,7 @@
     }
 
     // ==========================================
-    // 2. 圖片萃取 (VisionTab) - 超省錢/照抄型 Prompt (隱藏英文定義)
+    // 2. 圖片萃取 (VisionTab) - 支援單字與片語多模態識別
     // ==========================================
     function VisionTab({ vocabList, setVocabList, apiKey, playAudio, showToast }) {
       const [images, setImages] = useState([]);
@@ -314,12 +322,13 @@
       const extractVocabFromImage = async (base64String, mimeType) => {
         const base64Data = base64String.split(',')[1];
         
-        const prompt = `OCR and extract English words/phrases from this image. 
+        const prompt = `OCR and extract English words and phrases from this image. 
         CRITICAL RULES:
         1. If the image already contains the translations and example sentences, directly COPY them verbatim. Do not reinvent examples.
-        2. DO NOT output any English definitions ("enDef") to save maximum tokens and costs.
+        2. Identify whether each item is a single word or a multi-word phrase. Mark "pos" as "phrase" for idioms/phrases.
+        3. DO NOT output any English definitions ("enDef") to save maximum tokens and costs.
         Return a strict JSON array of objects. Each object must follow this structure exactly: 
-        {"word": "word/phrase", "ipa": "IPA pronunciation", "pos": "part of speech", "zh": "Traditional Chinese translation", "exampleEn": "Example sentence", "exampleZh": "Translation of the example"} 
+        {"word": "word/phrase", "ipa": "IPA pronunciation (leave blank if it is a phrase)", "pos": "part of speech", "zh": "Traditional Chinese translation", "exampleEn": "Example sentence", "exampleZh": "Translation of the example"} 
         Return ONLY the raw JSON array, do not wrap in markdown syntax.`;
 
         const payload = { 
@@ -383,7 +392,7 @@
             }
           }
         }
-        setStatus(allNewWords.length > 0 ? `萃取完成！共發現 ${allNewWords.length} 個新單字。` : '圖片中沒有找到新的未學單字。');
+        setStatus(allNewWords.length > 0 ? `萃取完成！共發現 ${allNewWords.length} 個新單字/片語。` : '圖片中沒有找到新的未學內容。');
         setIsProcessing(false);
         setImages([]);
       };
@@ -405,8 +414,8 @@
       return (
         <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-4"><Icon name="Camera" className="text-indigo-500" /> 圖片自動萃取單字</h2>
-            <p className="text-slate-500 mb-6 text-sm">上傳課本照片、單字卡截圖或菜單，AI 會自動掃描出所有英文單字，並過濾掉您已經學過的字！</p>
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-4"><Icon name="Camera" className="text-indigo-500" /> 圖片自動萃取單字與片語</h2>
+            <p className="text-slate-500 mb-6 text-sm">上傳課本照片、單字卡截圖或片語圖檔，AI 會自動掃描出所有內容，並過濾掉您已經學過的字！</p>
 
             {!isProcessing && images.length === 0 && extractedWords.length === 0 && (
               <div onClick={() => fileInputRef.current.click()} className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:bg-slate-50 hover:border-indigo-400 transition-colors">
@@ -432,7 +441,7 @@
                 ) : (
                   <div className="flex gap-3">
                     <button onClick={() => setImages([])} className="px-4 py-3 rounded-xl font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 flex-1">重新選擇</button>
-                    <button onClick={handleStartExtraction} className="px-4 py-3 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 flex-1">開始掃描單字</button>
+                    <button onClick={handleStartExtraction} className="px-4 py-3 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 flex-1">開始掃描</button>
                   </div>
                 )}
               </div>
@@ -444,26 +453,32 @@
           {extractedWords.length > 0 && (
             <div className="space-y-4">
               <div className="flex justify-between items-end px-2">
-                <h3 className="font-bold text-slate-700 text-lg">掃描成功的單字 ({extractedWords.length})</h3>
+                <h3 className="font-bold text-slate-700 text-lg">掃描成功的單字/片語 ({extractedWords.length})</h3>
                 <button onClick={saveAllToLibrary} className="text-indigo-600 font-bold flex items-center gap-1 text-sm bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100"><Icon name="PlusCircle" size={16} /> 全部加入字庫</button>
               </div>
               <div className="grid gap-3">
-                {extractedWords.map((wordObj, idx) => (
-                  <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between gap-4 items-center">
-                    <div className="w-full">
-                      <div className="flex items-center gap-2 mb-1">
-                        <button onClick={() => playAudio(wordObj.word)} className="text-amber-500 hover:text-amber-600 active:scale-95 transition-transform"><Icon name="Volume2" size={20} /></button>
-                        <span className="text-xl font-bold text-slate-900">{wordObj.word}</span>
-                        <span className="text-slate-400 text-sm ml-2 font-mono">{wordObj.ipa}</span>
+                {extractedWords.map((wordObj, idx) => {
+                  const isItemPhrase = isPhrase(wordObj);
+                  return (
+                    <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between gap-4 items-center">
+                      <div className="w-full">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <button onClick={() => playAudio(wordObj.word)} className="text-amber-500 hover:text-amber-600 active:scale-95 transition-transform"><Icon name="Volume2" size={20} /></button>
+                          <span className="text-xl font-bold text-slate-900">{wordObj.word}</span>
+                          {isItemPhrase && (
+                            <span className="text-[10px] font-bold bg-purple-50 text-purple-600 px-2 py-0.5 rounded-md border border-purple-100">片語</span>
+                          )}
+                          <span className="text-slate-400 text-sm font-mono">{wordObj.ipa}</span>
+                        </div>
+                        <div className="flex gap-2 items-center mb-2">
+                          <span className="bg-slate-100 text-slate-500 text-xs px-2 py-0.5 rounded uppercase font-bold">{wordObj.pos}</span>
+                          <span className="text-slate-800 font-bold">{wordObj.zh}</span>
+                        </div>
                       </div>
-                      <div className="flex gap-2 items-center mb-2">
-                        <span className="bg-slate-100 text-slate-500 text-xs px-2 py-0.5 rounded uppercase font-bold">{wordObj.pos}</span>
-                        <span className="text-slate-800 font-bold">{wordObj.zh}</span>
-                      </div>
+                      <button onClick={() => saveToLibrary(wordObj)} className="shrink-0 bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-sm w-full md:w-auto flex items-center justify-center gap-2 active:scale-95 transition-transform"><Icon name="Book" size={16} /> 存入</button>
                     </div>
-                    <button onClick={() => saveToLibrary(wordObj)} className="shrink-0 bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-sm w-full md:w-auto flex items-center justify-center gap-2 active:scale-95 transition-transform"><Icon name="Book" size={16} /> 存入</button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -472,81 +487,120 @@
     }
 
     // ==========================================
-    // 3. 我的單字庫 (LibraryTab) - 即點即查 + 專屬喇叭
+    // 3. 我的單字與片語庫 (LibraryTab)
     // ==========================================
     function LibraryTab({ vocabList, setVocabList, playAudio, onWordClick, showToast }) {
+      const [subFilter, setSubFilter] = useState('all'); // 'all', 'word', 'phrase'
+
       const toggleProperty = (word, prop) => {
         setVocabList(prev => prev.map(v => v.word === word ? { ...v, [prop]: !v[prop] } : v));
         showToast('學習進度已更新！', 'success');
       };
+
       const deleteWord = (word) => {
         setVocabList(prev => prev.filter(v => v.word !== word));
         showToast('已自字庫移除！', 'success');
       };
 
+      // 計算經過片語二級篩選後的列表
+      const filteredList = useMemo(() => {
+        return vocabList.filter(item => {
+          const itemIsPhrase = isPhrase(item);
+          if (subFilter === 'word') return !itemIsPhrase;
+          if (subFilter === 'phrase') return itemIsPhrase;
+          return true;
+        });
+      }, [vocabList, subFilter]);
+
       return (
         <div className="max-w-3xl mx-auto space-y-4 animate-fade-in">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-6">
-            <h2 className="text-xl font-bold">單字庫狀況</h2>
-            <p className="text-slate-500 mt-1">目前共收錄 {vocabList.length} 個單字，已標記排除測驗 {vocabList.filter(v=>v.mastered).length} 個。</p>
+          {/* 篩選標籤組 */}
+          <div className="flex gap-2 mb-4 justify-center">
+            <button 
+              onClick={() => setSubFilter('all')} 
+              className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${subFilter === 'all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+            >
+              全部 ({vocabList.length})
+            </button>
+            <button 
+              onClick={() => setSubFilter('word')} 
+              className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${subFilter === 'word' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+            >
+              單字 ({vocabList.filter(v => !isPhrase(v)).length})
+            </button>
+            <button 
+              onClick={() => setSubFilter('phrase')} 
+              className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${subFilter === 'phrase' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+            >
+              片語 ({vocabList.filter(isPhrase).length})
+            </button>
           </div>
-          {vocabList.length === 0 ? <p className="text-center text-slate-400 py-10">字庫是空的，快去查詢或擷取單字吧！</p> : 
-           vocabList.map(item => (
-            <div key={item.word} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between gap-4">
-              
-              <div className="flex gap-4 items-start w-full">
-                <button onClick={() => playAudio(item.word)} className="p-2 bg-slate-100 text-slate-600 rounded-full mt-1 shrink-0 active:scale-95 transition-transform"><Icon name="Volume2" size={20}/></button>
-                <div className="flex-1">
-                  <div className="flex flex-wrap items-end gap-2 mb-1">
-                    <h3 className={`text-xl font-bold ${item.mastered ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{item.word}</h3>
-                    <span className="text-sm text-slate-500 font-mono">{item.ipa}</span>
-                  </div>
-                  <p className="text-slate-800 font-bold mb-3">{item.zh}</p>
-                  
-                  {/* 例句區與例句即點即查發音 */}
-                  {item.exampleEn && (
-                    <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-50/50">
-                      <div className="flex items-start gap-2">
-                        <button onClick={() => playAudio(item.exampleEn)} className="p-1.5 shrink-0 bg-white text-indigo-500 rounded-full shadow-sm active:scale-90 transition-transform">
-                          <Icon name="Volume1" size={16} />
-                        </button>
-                        <div>
-                          <p className="text-slate-800 font-medium leading-relaxed">
-                            {item.exampleEn.split(' ').map((word, i) => (
-                              <span 
-                                key={i} 
-                                onClick={() => onWordClick(word)} 
-                                className="cursor-pointer hover:bg-indigo-200 hover:text-indigo-900 rounded px-0.5 transition-colors"
-                              >
-                                {word}{' '}
-                              </span>
-                            ))}
-                          </p>
-                          <p className="text-slate-500 text-sm mt-1">{item.exampleZh}</p>
+
+          {filteredList.length === 0 ? (
+            <p className="text-center text-slate-400 py-10 font-bold">字庫中沒有符合篩選的字詞！</p>
+          ) : (
+            filteredList.map(item => {
+              const itemIsPhrase = isPhrase(item);
+              return (
+                <div key={item.word} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between gap-4">
+                  <div className="flex gap-4 items-start w-full">
+                    <button onClick={() => playAudio(item.word)} className="p-2 bg-slate-100 text-slate-600 rounded-full mt-1 shrink-0 active:scale-95 transition-transform"><Icon name="Volume2" size={20}/></button>
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-end gap-2 mb-1">
+                        <h3 className={`text-xl font-bold ${item.mastered ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{item.word}</h3>
+                        {itemIsPhrase && (
+                          <span className="text-[10px] font-bold bg-purple-50 text-purple-600 px-2 py-0.5 rounded-md border border-purple-100">片語</span>
+                        )}
+                        <span className="text-sm text-slate-500 font-mono">{item.ipa}</span>
+                      </div>
+                      <p className="text-slate-800 font-bold mb-3">{item.zh}</p>
+                      
+                      {/* 例句區與例句即點即查發音 */}
+                      {item.exampleEn && (
+                        <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-50/50">
+                          <div className="flex items-start gap-2">
+                            <button onClick={() => playAudio(item.exampleEn)} className="p-1.5 shrink-0 bg-white text-indigo-500 rounded-full shadow-sm active:scale-90 transition-transform">
+                              <Icon name="Volume1" size={16} />
+                            </button>
+                            <div>
+                              <p className="text-slate-800 font-medium leading-relaxed">
+                                {item.exampleEn.split(' ').map((word, i) => (
+                                  <span 
+                                    key={i} 
+                                    onClick={() => onWordClick(word)} 
+                                    className="cursor-pointer hover:bg-indigo-200 hover:text-indigo-900 rounded px-0.5 transition-colors"
+                                  >
+                                    {word}{' '}
+                                  </span>
+                                ))}
+                              </p>
+                              <p className="text-slate-500 text-sm mt-1">{item.exampleZh}</p>
+                            </div>
+                          </div>
                         </div>
+                      )}
+
+                      <div className="flex gap-2 mt-3">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-600">連續答對: {item.repetition || 0} 次</span>
+                        {item.nextReview > Date.now() && <span className="text-xs font-bold px-2 py-0.5 rounded bg-green-50 text-green-600">已排程複習</span>}
                       </div>
                     </div>
-                  )}
-
-                  <div className="flex gap-2 mt-3">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-600">連續答對: {item.repetition || 0} 次</span>
-                    {item.nextReview > Date.now() && <span className="text-xs font-bold px-2 py-0.5 rounded bg-green-50 text-green-600">已排程複習</span>}
+                  </div>
+                  
+                  <div className="flex md:flex-col gap-2 shrink-0 self-end md:self-start">
+                    <button onClick={() => toggleProperty(item.word, 'mastered')} title="排除於測驗" className={`p-2 rounded-xl active:scale-95 transition-transform ${item.mastered ? 'text-green-600 bg-green-50 border border-green-200' : 'text-slate-400 bg-slate-50 border border-slate-100'}`}><Icon name="CheckCircle" size={20}/></button>
+                    <button onClick={() => deleteWord(item.word)} className="p-2 rounded-xl text-red-400 bg-slate-50 border border-slate-100 active:scale-95 transition-transform"><Icon name="Trash2" size={20}/></button>
                   </div>
                 </div>
-              </div>
-              
-              <div className="flex md:flex-col gap-2 shrink-0 self-end md:self-start">
-                <button onClick={() => toggleProperty(item.word, 'mastered')} title="排除於測驗" className={`p-2 rounded-xl active:scale-95 transition-transform ${item.mastered ? 'text-green-600 bg-green-50 border border-green-200' : 'text-slate-400 bg-slate-50 border border-slate-100'}`}><Icon name="CheckCircle" size={20}/></button>
-                <button onClick={() => deleteWord(item.word)} className="p-2 rounded-xl text-red-400 bg-slate-50 border border-slate-100 active:scale-95 transition-transform"><Icon name="Trash2" size={20}/></button>
-              </div>
-            </div>
-          ))}
+              );
+            })
+          )}
         </div>
       );
     }
 
     // ==========================================
-    // 4. AI 測驗 (QuizTab) - Anki SM-2 演算法與聽音拼寫
+    // 4. AI 測驗 (QuizTab) - 支援單字與片語
     // ==========================================
     function QuizTab({ vocabList, setVocabList, playAudio, showToast }) {
       const [dueCards, setDueCards] = useState([]);
@@ -620,7 +674,7 @@
 
         let nextReviewTime = Date.now();
         if (interval === 0) {
-           nextReviewTime += 1 * 60 * 1000; // 忘記的話 1 分鐘後再次出現
+           nextReviewTime += 1 * 60 * 1000; 
         } else {
            nextReviewTime += interval * 24 * 60 * 60 * 1000; 
         }
@@ -635,6 +689,8 @@
         showToast('記憶權重已更新！', 'success');
       };
 
+      const isCurrentPhrase = isPhrase(current);
+
       return (
         <div className="max-w-lg mx-auto pt-6 flex flex-col min-h-[60vh] animate-fade-in">
           <div className="flex justify-between items-center mb-8 px-2">
@@ -643,9 +699,12 @@
           </div>
 
           <div className="text-center flex-1">
-            <p className="text-slate-500 font-bold uppercase tracking-wider mb-2">{current.pos}</p>
+            <p className="text-slate-500 font-bold uppercase tracking-wider mb-2">
+              {current.pos}
+              {isCurrentPhrase && " • phrase"}
+            </p>
             
-            {/* 中文大標與發音小喇叭並排置中 */}
+            {/* 中文大標與發音小喇叭 */}
             <div className="flex justify-center items-center gap-3 mb-8">
               <h2 className="text-4xl font-black text-slate-800">{current.zh}</h2>
               <button onClick={() => playAudio(current.word)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full shadow-sm active:scale-90 transition-transform">
@@ -658,7 +717,7 @@
                 <input 
                   type="text" autoFocus value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleCheck()} 
                   className="w-full text-center text-3xl p-4 bg-white rounded-2xl shadow-sm outline-none border-2 border-transparent focus:border-indigo-400 transition-colors" 
-                  placeholder="請拼出英文..." 
+                  placeholder={isCurrentPhrase ? "請拼出英文片語..." : "請拼出英文單字..."} 
                 />
                 <button onClick={handleCheck} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-lg hover:bg-slate-800 active:scale-95 transition-transform">檢查答案</button>
               </div>
@@ -666,11 +725,14 @@
               <div className="space-y-8 animate-fade-in">
                 <div className={`p-6 rounded-3xl border-2 ${isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                    <p className={`font-bold mb-1 ${isCorrect ? 'text-green-600' : 'text-red-500'}`}>{isCorrect ? '🎯 拼寫正確！' : '❌ 拼錯了！正確答案是：'}</p>
-                   <div className="flex justify-center items-center gap-3">
+                   <div className="flex justify-center items-center gap-3 flex-wrap">
                      <h3 className="text-4xl font-black text-slate-900">{current.word}</h3>
                      <button onClick={() => playAudio(current.word)} className="p-2 bg-white rounded-full shadow-sm text-slate-600 active:scale-90 transition-transform"><Icon name="Volume2" /></button>
+                     {isCurrentPhrase && (
+                       <span className="text-xs font-bold bg-purple-50 text-purple-600 px-2 py-1 rounded-md border border-purple-100">片語</span>
+                     )}
                    </div>
-                   <p className="text-slate-500 mt-2 font-mono">{current.ipa}</p>
+                   {current.ipa && <p className="text-slate-500 mt-2 font-mono">{current.ipa}</p>}
                 </div>
                 
                 <div>
