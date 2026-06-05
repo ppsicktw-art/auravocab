@@ -23,7 +23,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef, useCallback } = React;
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
     // --- SVG 圖示庫 ---
     const Icon = ({ name, size = 24, className = "" }) => {
@@ -42,7 +42,8 @@
         PlusCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>`,
         Key: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>`,
         PartyPopper: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><path d="M5.8 11.3 2 22l10.7-3.79"/><path d="M4 3h.01"/><path d="M22 8h.01"/><path d="M15 2h.01"/><path d="M22 20h.01"/><path d="m22 2-2.24.75a2.9 2.9 0 0 0-1.96 3.12v0c.1.86-.57 1.63-1.45 1.63h-.38c-.86 0-1.6.6-1.76 1.44L14 10"/><path d="m22 13-.82-.33c-.86-.34-1.82.2-1.98 1.11v0c-.11.7-.72 1.22-1.43 1.22H17"/><path d="m11 2 .33.82c.34.86-.2 1.82-1.11 1.98v0C9.52 4.91 9 5.52 9 6.23V7"/><path d="M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z"/></svg>`,
-        Volume1: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`
+        Volume1: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${className}"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`,
+        Check: `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="${className}"><polyline points="20 6 9 17 4 12"/></svg>`
       };
       return <div dangerouslySetInnerHTML={{ __html: icons[name] }} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} />;
     };
@@ -62,6 +63,11 @@
       addedAt: Date.now()
     });
 
+    const cleanJsonString = (str) => {
+      const match = str.match(/\{[\s\S]*\}/);
+      return match ? match[0] : str;
+    };
+
     const MOCK_VOCAB = [
       initAnkiParams({ word: "resilience", ipa: "/rɪˈzɪliəns/", pos: "noun", zh: "韌性；恢復力", exampleEn: "She showed great resilience in the face of adversity.", exampleZh: "她在逆境中展現了極大的韌性。" })
     ];
@@ -72,6 +78,7 @@
     function App() {
       const [activeTab, setActiveTab] = useState('search');
       const [searchTriggerWord, setSearchTriggerWord] = useState(''); // 用來傳遞點擊的單字
+      const [toast, setToast] = useState(null);
       
       const [vocabList, setVocabList] = useState(() => {
         const saved = localStorage.getItem('auraVocabList');
@@ -86,18 +93,26 @@
       useEffect(() => { localStorage.setItem('auraVocabList', JSON.stringify(vocabList)); }, [vocabList]);
       useEffect(() => { localStorage.setItem('auraSettings', JSON.stringify(settings)); }, [settings]);
 
+      const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3000);
+      };
+
       const playAudio = (text) => {
         if (!text) return;
+        window.speechSynthesis.cancel(); // 防止死鎖排隊
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'en-US';
+        utterance.rate = 0.85; // 稍微放慢發音
         window.speechSynthesis.speak(utterance);
       };
 
       const dueCount = vocabList.filter(v => !v.mastered && v.nextReview <= Date.now()).length;
 
-      // 當點擊例句單字時觸發
+      // 點擊例句單字時觸發即點即查
       const handleWordClick = (word) => {
-        const cleanWord = word.replace(/[^a-zA-Z'-]/g, ''); // 去除標點符號，保留字母和連字符
+        // 清除頭尾標點符號，保留單字本體
+        const cleanWord = word.replace(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘]+/g, "").replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'”’]+$/g, "");
         if (cleanWord) {
           setSearchTriggerWord(cleanWord);
           setActiveTab('search');
@@ -121,6 +136,7 @@
 
       return (
         <div className="h-dvh w-full bg-slate-50 flex flex-col md:flex-row text-slate-800 font-sans overflow-hidden">
+          {/* 電腦版左側邊欄 */}
           <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 shrink-0">
             <div className="p-6 border-b border-slate-100 flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-xl">A</div>
@@ -135,35 +151,147 @@
             </nav>
           </aside>
 
+          {/* 主要內文區 */}
           <main className="flex-1 flex flex-col min-h-0 relative">
             <header className="md:hidden shrink-0 bg-white border-b border-slate-200 p-4 sticky top-0 z-10 flex justify-center items-center">
-              <h1 className="text-lg font-bold">AuraVocab</h1>
+              <h1 className="text-lg font-bold text-slate-800">AuraVocab</h1>
             </header>
             
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
-              {activeTab === 'search' && <SearchTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} searchTriggerWord={searchTriggerWord} clearTrigger={() => setSearchTriggerWord('')} />}
-              {activeTab === 'vision' && <VisionTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} />}
-              {activeTab === 'library' && <LibraryTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} onWordClick={handleWordClick} />}
-              {activeTab === 'quiz' && <QuizTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} />}
-              {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} />}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-28 md:pb-8">
+              {activeTab === 'search' && <SearchTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} searchTriggerWord={searchTriggerWord} clearTrigger={() => setSearchTriggerWord('')} showToast={showToast} />}
+              {activeTab === 'vision' && <VisionTab vocabList={vocabList} setVocabList={setVocabList} apiKey={settings.apiKey} playAudio={playAudio} showToast={showToast} />}
+              {activeTab === 'library' && <LibraryTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} onWordClick={handleWordClick} showToast={showToast} />}
+              {activeTab === 'quiz' && <QuizTab vocabList={vocabList} setVocabList={setVocabList} playAudio={playAudio} showToast={showToast} />}
+              {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} showToast={showToast} />}
             </div>
           </main>
 
-          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around px-1 pt-2 pb-6 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] z-50">
+          {/* 手機版大拇指底部導覽列 */}
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around px-1 pt-2 pb-6 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] z-40">
             <MobileNavItem active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon="Search" label="查詢" />
             <MobileNavItem active={activeTab === 'vision'} onClick={() => setActiveTab('vision')} icon="Camera" label="圖片" />
             <MobileNavItem active={activeTab === 'library'} onClick={() => setActiveTab('library')} icon="Book" label="字庫" />
             <MobileNavItem active={activeTab === 'quiz'} onClick={() => setActiveTab('quiz')} icon="Brain" label="複習" badge={dueCount > 0 ? dueCount : undefined} />
             <MobileNavItem active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon="Settings" label="設定" />
           </nav>
+
+          {/* Toast 漂浮回饋視窗 */}
+          {toast && (
+            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-fade-in pointer-events-none">
+              <div className={`px-4 py-2 rounded-xl shadow-lg border text-sm font-semibold flex items-center gap-2 ${
+                toast.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 
+                toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-slate-50 border-slate-200 text-slate-800'
+              }`}>
+                {toast.type === 'success' && <Icon name="Check" className="w-4 h-4 text-emerald-600" />}
+                {toast.message}
+              </div>
+            </div>
+          )}
         </div>
       );
     }
 
     // ==========================================
-    // 圖片擷取 (Vision) - 取消英文定義與例句顯示
+    // 1. 智慧查詢 (SearchTab) - 省錢版 Prompt (隱藏例句與英英定義)
     // ==========================================
-    function VisionTab({ vocabList, setVocabList, apiKey, playAudio }) {
+    function SearchTab({ vocabList, setVocabList, apiKey, playAudio, searchTriggerWord, clearTrigger, showToast }) {
+      const [query, setQuery] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState(null);
+
+      // 當點擊例句單字跳轉過來時，自動觸發查詢
+      useEffect(() => {
+        if (searchTriggerWord) {
+          setQuery(searchTriggerWord);
+          searchWord(searchTriggerWord);
+          clearTrigger();
+        }
+      }, [searchTriggerWord]);
+
+      const searchWord = async (wordToSearch = query) => {
+        const targetWord = wordToSearch.trim().toLowerCase();
+        if (!targetWord) return;
+        setLoading(true); setError(null); setResult(null);
+
+        try {
+          // 修改 Prompt 移除 enDef (英英定義) 減少流量消耗，且不要求複雜的延伸說明
+          const prompt = `Analyze the English word or phrase: "${targetWord}". 
+          Provide JSON response: {"word": "exact word/phrase lowercase", "ipa": "IPA pronunciation", "pos": "part of speech", "zh": "Traditional Chinese translation", "exampleEn": "Simple practical context sentence", "exampleZh": "Traditional Chinese translation of example"}`;
+          
+          const payload = { 
+            contents: [{ parts: [{ text: prompt }] }], 
+            generationConfig: { responseMimeType: "application/json" } 
+          };
+          
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, // FIXED: 補上此 Content-Type 防止 JSON payload 錯誤
+            body: JSON.stringify(payload) 
+          });
+
+          if (response.status === 429) throw new Error("API 請求過於頻繁，請稍候重試。");
+          if (!response.ok) throw new Error("查詢失敗，請檢查 API Key 是否有效。");
+
+          const data = await response.json();
+          const rawText = data.candidates[0].content.parts[0].text;
+          const parsed = JSON.parse(cleanJsonString(rawText));
+          
+          setResult(parsed);
+          playAudio(parsed.word);
+        } catch (err) { 
+          setError(err.message); 
+        } finally { 
+          setLoading(false); 
+        }
+      };
+
+      const isSaved = result && vocabList.some(v => v.word.toLowerCase() === result.word.toLowerCase());
+      
+      const saveWord = () => { 
+        if (!isSaved) {
+          setVocabList(prev => [initAnkiParams(result), ...prev]); 
+          showToast('已成功存入單字庫！', 'success');
+        }
+      };
+
+      return (
+        <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+          <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex items-center">
+            <Icon name="Search" className="text-slate-400 mx-3" size={20} />
+            <input type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchWord()} placeholder="輸入單字查詢..." className="flex-1 bg-transparent outline-none p-2 text-lg" />
+            <button onClick={() => searchWord()} disabled={loading} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold disabled:opacity-50">查詢</button>
+          </div>
+          {loading && <div className="text-center py-10 text-indigo-500"><Icon name="Loader2" className="animate-spin mx-auto mb-2" size={32}/>分析中...</div>}
+          {error && <div className="p-4 bg-red-50 text-red-600 rounded-xl flex items-center gap-2"><Icon name="AlertCircle" /> {error}</div>}
+          {result && !loading && (
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 animate-fade-in">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-4xl font-black text-slate-900">{result.word}</h2>
+                    <button onClick={() => playAudio(result.word)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full active:scale-95 transition-transform"><Icon name="Volume2" /></button>
+                  </div>
+                  <p className="text-slate-500 mt-2 font-mono">{result.ipa} • <span className="text-indigo-500 italic">{result.pos}</span></p>
+                </div>
+                <button onClick={saveWord} disabled={isSaved} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold ${isSaved ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-slate-900 text-white active:scale-95 transition-transform'}`}>
+                  {isSaved ? <><Icon name="CheckCircle" size={18}/> 已收藏</> : <><Icon name="Book" size={18}/> 收藏</>}
+                </button>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Traditional Chinese</h3>
+                <p className="text-2xl font-bold text-slate-800">{result.zh}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 2. 圖片萃取 (VisionTab) - 超省錢/照抄型 Prompt (隱藏英文定義)
+    // ==========================================
+    function VisionTab({ vocabList, setVocabList, apiKey, playAudio, showToast }) {
       const [images, setImages] = useState([]);
       const [isProcessing, setIsProcessing] = useState(false);
       const [status, setStatus] = useState('');
@@ -186,14 +314,24 @@
       const extractVocabFromImage = async (base64String, mimeType) => {
         const base64Data = base64String.split(',')[1];
         
-        const prompt = `You are an expert English teacher. Extract the main English vocabulary words from this image. 
-        Even if the image is a screenshot of a dictionary app, vocabulary flashcards, or a list, extract the target English words being defined or shown.
-        Return a strict JSON array of objects. Maximum 15 words. Each object must have this exact structure: 
-        {"word": "the word", "ipa": "IPA pronunciation", "pos": "part of speech", "zh": "Traditional Chinese meaning", "exampleEn": "A practical example sentence", "exampleZh": "Translation of the example"} 
-        Return ONLY the JSON array. Do not use markdown formatting.`;
+        const prompt = `OCR and extract English words/phrases from this image. 
+        CRITICAL RULES:
+        1. If the image already contains the translations and example sentences, directly COPY them verbatim. Do not reinvent examples.
+        2. DO NOT output any English definitions ("enDef") to save maximum tokens and costs.
+        Return a strict JSON array of objects. Each object must follow this structure exactly: 
+        {"word": "word/phrase", "ipa": "IPA pronunciation", "pos": "part of speech", "zh": "Traditional Chinese translation", "exampleEn": "Example sentence", "exampleZh": "Translation of the example"} 
+        Return ONLY the raw JSON array, do not wrap in markdown syntax.`;
 
-        const payload = { contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Data } }] }], generationConfig: { responseMimeType: "application/json" } };
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const payload = { 
+          contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Data } }] }], 
+          generationConfig: { responseMimeType: "application/json" } 
+        };
+        
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`, { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload) 
+        });
 
         if (response.status === 429) throw new Error("429");
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -202,8 +340,7 @@
         const jsonText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!jsonText) throw new Error("No data returned");
         
-        const cleanedText = jsonText.replace(/```json/gi, '').replace(/```/g, '').trim();
-        return JSON.parse(cleanedText);
+        return JSON.parse(cleanJsonString(jsonText));
       };
 
       const handleStartExtraction = async () => {
@@ -254,6 +391,7 @@
       const saveToLibrary = (wordObj) => {
         setVocabList(prev => [initAnkiParams(wordObj), ...prev]);
         setExtractedWords(prev => prev.filter(w => w.word !== wordObj.word));
+        showToast('已存入單字庫！', 'success');
       };
 
       const saveAllToLibrary = () => {
@@ -261,10 +399,11 @@
         setVocabList(prev => [...wordsToAdd, ...prev]);
         setExtractedWords([]);
         setStatus('已全部存入單字庫！');
+        showToast('全部已加入！', 'success');
       };
 
       return (
-        <div className="max-w-2xl mx-auto space-y-6">
+        <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-4"><Icon name="Camera" className="text-indigo-500" /> 圖片自動萃取單字</h2>
             <p className="text-slate-500 mb-6 text-sm">上傳課本照片、單字卡截圖或菜單，AI 會自動掃描出所有英文單字，並過濾掉您已經學過的字！</p>
@@ -333,91 +472,20 @@
     }
 
     // ==========================================
-    // 智慧查詢 (Search) - 精簡版 (取消例句與英文定義)
+    // 3. 我的單字庫 (LibraryTab) - 即點即查 + 專屬喇叭
     // ==========================================
-    function SearchTab({ vocabList, setVocabList, apiKey, playAudio, searchTriggerWord, clearTrigger }) {
-      const [query, setQuery] = useState('');
-      const [loading, setLoading] = useState(false);
-      const [result, setResult] = useState(null);
-      const [error, setError] = useState(null);
-
-      // 當點擊例句單字跳轉過來時，自動觸發查詢
-      useEffect(() => {
-        if (searchTriggerWord) {
-          setQuery(searchTriggerWord);
-          searchWord(searchTriggerWord);
-          clearTrigger();
-        }
-      }, [searchTriggerWord]);
-
-      const searchWord = async (wordToSearch = query) => {
-        const targetWord = wordToSearch.trim().toLowerCase();
-        if (!targetWord) return;
-        setLoading(true); setError(null); setResult(null);
-
-        try {
-          // 修改 Prompt 移除 enDef 減少消耗
-          const prompt = `Analyze the English word: "${targetWord}". Provide JSON response: {"word": "exact word lowercase", "ipa": "IPA", "pos": "part of speech", "zh": "Traditional Chinese translation", "exampleEn": "Example sentence", "exampleZh": "Traditional Chinese example translation"}`;
-          const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } };
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`, { method: 'POST', body: JSON.stringify(payload) });
-
-          if (response.status === 429) throw new Error("API 請求過於頻繁，請休息 1 分鐘後再試。");
-          if (!response.ok) throw new Error("查詢失敗");
-
-          const data = await response.json();
-          const cleanedText = data.candidates[0].content.parts[0].text.replace(/```json/gi, '').replace(/```/g, '').trim();
-          const parsed = JSON.parse(cleanedText);
-          
-          setResult(parsed);
-          playAudio(parsed.word);
-        } catch (err) { setError(err.message); } finally { setLoading(false); }
+    function LibraryTab({ vocabList, setVocabList, playAudio, onWordClick, showToast }) {
+      const toggleProperty = (word, prop) => {
+        setVocabList(prev => prev.map(v => v.word === word ? { ...v, [prop]: !v[prop] } : v));
+        showToast('學習進度已更新！', 'success');
+      };
+      const deleteWord = (word) => {
+        setVocabList(prev => prev.filter(v => v.word !== word));
+        showToast('已自字庫移除！', 'success');
       };
 
-      const isSaved = result && vocabList.some(v => v.word.toLowerCase() === result.word.toLowerCase());
-      const saveWord = () => { if (!isSaved) setVocabList(prev => [initAnkiParams(result), ...prev]); };
-
       return (
-        <div className="max-w-2xl mx-auto space-y-6">
-          <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex items-center">
-            <Icon name="Search" className="text-slate-400 mx-3" size={20} />
-            <input type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchWord()} placeholder="輸入單字查詢..." className="flex-1 bg-transparent outline-none p-2 text-lg" />
-            <button onClick={() => searchWord()} disabled={loading} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold disabled:opacity-50">查詢</button>
-          </div>
-          {loading && <div className="text-center py-10 text-indigo-500"><Icon name="Loader2" className="animate-spin mx-auto mb-2" size={32}/>分析中...</div>}
-          {error && <div className="p-4 bg-red-50 text-red-600 rounded-xl flex items-center gap-2"><Icon name="AlertCircle" /> {error}</div>}
-          {result && !loading && (
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-4xl font-black text-slate-900">{result.word}</h2>
-                    <button onClick={() => playAudio(result.word)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full active:scale-95 transition-transform"><Icon name="Volume2" /></button>
-                  </div>
-                  <p className="text-slate-500 mt-2 font-mono">{result.ipa} • <span className="text-indigo-500 italic">{result.pos}</span></p>
-                </div>
-                <button onClick={saveWord} disabled={isSaved} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold ${isSaved ? 'bg-green-50 text-green-600' : 'bg-slate-900 text-white active:scale-95 transition-transform'}`}>
-                  {isSaved ? <><Icon name="CheckCircle" size={18}/> 已收藏</> : <><Icon name="Book" size={18}/> 收藏</>}
-                </button>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-xl">
-                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Traditional Chinese</h3>
-                <p className="text-2xl font-bold">{result.zh}</p>
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // ==========================================
-    // 我的單字庫 (Library) - 新增例句與專屬喇叭
-    // ==========================================
-    function LibraryTab({ vocabList, setVocabList, playAudio, onWordClick }) {
-      const toggleProperty = (word, prop) => setVocabList(prev => prev.map(v => v.word === word ? { ...v, [prop]: !v[prop] } : v));
-      const deleteWord = (word) => setVocabList(prev => prev.filter(v => v.word !== word));
-
-      return (
-        <div className="max-w-3xl mx-auto space-y-4">
+        <div className="max-w-3xl mx-auto space-y-4 animate-fade-in">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-6">
             <h2 className="text-xl font-bold">單字庫狀況</h2>
             <p className="text-slate-500 mt-1">目前共收錄 {vocabList.length} 個單字，已標記排除測驗 {vocabList.filter(v=>v.mastered).length} 個。</p>
@@ -435,7 +503,7 @@
                   </div>
                   <p className="text-slate-800 font-bold mb-3">{item.zh}</p>
                   
-                  {/* 例句區與例句發音 */}
+                  {/* 例句區與例句即點即查發音 */}
                   {item.exampleEn && (
                     <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-50/50">
                       <div className="flex items-start gap-2">
@@ -468,8 +536,8 @@
               </div>
               
               <div className="flex md:flex-col gap-2 shrink-0 self-end md:self-start">
-                <button onClick={() => toggleProperty(item.word, 'mastered')} title="排除於測驗" className={`p-2 rounded-xl active:scale-95 transition-transform ${item.mastered ? 'text-green-600 bg-green-50' : 'text-slate-400 bg-slate-50'}`}><Icon name="CheckCircle" size={20}/></button>
-                <button onClick={() => deleteWord(item.word)} className="p-2 rounded-xl text-red-400 bg-slate-50 active:scale-95 transition-transform"><Icon name="Trash2" size={20}/></button>
+                <button onClick={() => toggleProperty(item.word, 'mastered')} title="排除於測驗" className={`p-2 rounded-xl active:scale-95 transition-transform ${item.mastered ? 'text-green-600 bg-green-50 border border-green-200' : 'text-slate-400 bg-slate-50 border border-slate-100'}`}><Icon name="CheckCircle" size={20}/></button>
+                <button onClick={() => deleteWord(item.word)} className="p-2 rounded-xl text-red-400 bg-slate-50 border border-slate-100 active:scale-95 transition-transform"><Icon name="Trash2" size={20}/></button>
               </div>
             </div>
           ))}
@@ -478,9 +546,9 @@
     }
 
     // ==========================================
-    // AI 測驗 (Quiz - Anki SM-2 演算法)
+    // 4. AI 測驗 (QuizTab) - Anki SM-2 演算法與聽音拼寫
     // ==========================================
-    function QuizTab({ vocabList, setVocabList, playAudio }) {
+    function QuizTab({ vocabList, setVocabList, playAudio, showToast }) {
       const [dueCards, setDueCards] = useState([]);
       const [current, setCurrent] = useState(null);
       const [input, setInput] = useState('');
@@ -552,7 +620,7 @@
 
         let nextReviewTime = Date.now();
         if (interval === 0) {
-           nextReviewTime += 1 * 60 * 1000; 
+           nextReviewTime += 1 * 60 * 1000; // 忘記的話 1 分鐘後再次出現
         } else {
            nextReviewTime += interval * 24 * 60 * 60 * 1000; 
         }
@@ -564,10 +632,11 @@
         setIsRevealed(false);
         setIsCorrect(null);
         setCurrent(null);
+        showToast('記憶權重已更新！', 'success');
       };
 
       return (
-        <div className="max-w-lg mx-auto pt-6 flex flex-col min-h-[60vh]">
+        <div className="max-w-lg mx-auto pt-6 flex flex-col min-h-[60vh] animate-fade-in">
           <div className="flex justify-between items-center mb-8 px-2">
             <span className="bg-indigo-100 text-indigo-700 font-bold px-3 py-1 rounded-full text-sm">今日剩餘：{dueCards.length}</span>
             <span className="text-slate-400 text-sm font-medium">連續答對 {current.repetition || 0} 次</span>
@@ -576,6 +645,7 @@
           <div className="text-center flex-1">
             <p className="text-slate-500 font-bold uppercase tracking-wider mb-2">{current.pos}</p>
             
+            {/* 中文大標與發音小喇叭並排置中 */}
             <div className="flex justify-center items-center gap-3 mb-8">
               <h2 className="text-4xl font-black text-slate-800">{current.zh}</h2>
               <button onClick={() => playAudio(current.word)} className="p-2 bg-indigo-50 text-indigo-600 rounded-full shadow-sm active:scale-90 transition-transform">
@@ -632,17 +702,17 @@
     }
 
     // ==========================================
-    // 設定 (Settings)
+    // 5. 設定 (SettingsTab)
     // ==========================================
-    function SettingsTab({ settings, setSettings }) {
+    function SettingsTab({ settings, setSettings, showToast }) {
       const [tempKey, setTempKey] = useState(settings.apiKey);
       return (
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-2xl mx-auto animate-fade-in">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Icon name="Key" className="text-indigo-500"/> API Key 安全綁定</h2>
             <p className="text-sm text-slate-500 mb-4">請貼上您的 Gemini API Key。這把金鑰只會加密儲存於您手機的瀏覽器中，絕對安全，不會上傳到任何公開伺服器。</p>
             <input type="password" value={tempKey} onChange={e=>setTempKey(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 outline-none focus:border-indigo-500" placeholder="AIzaSy..." />
-            <button onClick={() => {setSettings({...settings, apiKey: tempKey}); alert('金鑰已安全儲存！');}} className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl active:scale-95 transition-transform">儲存金鑰</button>
+            <button onClick={() => {setSettings({...settings, apiKey: tempKey}); showToast('金鑰已安全儲存！', 'success');}} className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl active:scale-95 transition-transform">儲存金鑰</button>
           </div>
         </div>
       );
