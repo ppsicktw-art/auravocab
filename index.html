@@ -47,7 +47,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const APP_VERSION = 'T017';
+    const APP_VERSION = 'T018';
 
     const SPELLING_INPUT_PROPS = {
       autoComplete: 'off',
@@ -1139,6 +1139,8 @@
       };
 
       const ratingLabels = currentCard ? getRatingLabels(currentCard) : null;
+      const step1Done = recordState === 'recorded';
+      const step2Done = hasListened;
 
       const generateHintPattern = (word) => {
         return word.split('').map(char => {
@@ -1193,20 +1195,18 @@
               </div>
               {!showAnswer && (
                 <p className="text-xs text-slate-400 font-medium">
-                  {recordState === 'idle' && '① 看著中文，按麥克風說出英文'}
-                  {recordState === 'recording' && '🔴 錄音中…再按一次停止並播放'}
-                  {recordState === 'recorded' && '✓ 已錄音，再按麥克風可重聽'}
+                  {!step1Done && recordState === 'idle' && '① 看著中文，按麥克風說出英文'}
+                  {!step1Done && recordState === 'recording' && '🔴 錄音中…再按一次停止並播放'}
+                  {step1Done && !step2Done && '✓ ① 已完成，再按麥克風可重聽自己的發音'}
+                  {step2Done && '✓ ①② 已完成，開始拼寫英文'}
                 </p>
               )}
             </div>
 
-            {!showAnswer && (
-              <div className="space-y-4 border-t border-slate-50 pt-4">
+            {!showAnswer && step1Done && !step2Done && (
+              <div className="animate-fade-in border-t border-slate-50 pt-4">
                 <div className="bg-forest-50/60 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-500">② 對照標準發音</span>
-                    {hasListened && <span className="text-[10px] font-bold text-emerald-600">✓ 已聆聽</span>}
-                  </div>
+                  <span className="text-xs font-bold text-slate-500">② 對照標準發音</span>
                   <button
                     onClick={() => { playAudio(currentCard.word); setHasListened(true); }}
                     className="w-full flex items-center justify-center gap-2 py-3 bg-white hover:bg-forest-50 border border-forest-100 text-forest-700 font-bold rounded-xl transition active:scale-95"
@@ -1215,34 +1215,36 @@
                     <span>聽標準發音，確認剛才說得對不對</span>
                   </button>
                 </div>
+              </div>
+            )}
 
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-500">③ 拼寫英文</span>
-                    {!showHint ? (
-                      <button onClick={() => setShowHint(true)} className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-full transition active:scale-95">
-                        <Icon name="eye" className="w-3.5 h-3.5" /> 長度提示
-                      </button>
-                    ) : (
-                      <button onClick={() => setShowHint(false)} className="text-[10px] font-bold text-slate-400">收起</button>
-                    )}
-                  </div>
-                  {showHint && (
-                    <div className="animate-fade-in bg-slate-50 border border-slate-100 px-4 py-2 rounded-xl text-center">
-                      <span className="text-lg font-mono text-slate-400 tracking-widest whitespace-pre">{generateHintPattern(currentCard.word)}</span>
-                    </div>
+            {!showAnswer && step2Done && (
+              <div className="animate-fade-in space-y-3 border-t border-slate-50 pt-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500">③ 拼寫英文</span>
+                  {!showHint ? (
+                    <button onClick={() => setShowHint(true)} className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-full transition active:scale-95">
+                      <Icon name="eye" className="w-3.5 h-3.5" /> 長度提示
+                    </button>
+                  ) : (
+                    <button onClick={() => setShowHint(false)} className="text-[10px] font-bold text-slate-400">收起</button>
                   )}
-                  <input
-                    type="text"
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    placeholder="輸入英文拼寫…"
-                    className="w-full text-center text-lg font-semibold px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-forest-600 shadow-inner"
-                    onKeyDown={(e) => e.key === 'Enter' && handleCheckAnswer()}
-                    {...SPELLING_INPUT_PROPS}
-                  />
-                  <button onClick={handleCheckAnswer} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-2xl shadow active:scale-95 transition">💡 檢查答案</button>
                 </div>
+                {showHint && (
+                  <div className="animate-fade-in bg-slate-50 border border-slate-100 px-4 py-2 rounded-xl text-center">
+                    <span className="text-lg font-mono text-slate-400 tracking-widest whitespace-pre">{generateHintPattern(currentCard.word)}</span>
+                  </div>
+                )}
+                <input
+                  type="text"
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  placeholder="輸入英文拼寫…"
+                  className="w-full text-center text-lg font-semibold px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-forest-600 shadow-inner"
+                  onKeyDown={(e) => e.key === 'Enter' && handleCheckAnswer()}
+                  {...SPELLING_INPUT_PROPS}
+                />
+                <button onClick={handleCheckAnswer} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-2xl shadow active:scale-95 transition">💡 檢查答案</button>
               </div>
             )}
 
