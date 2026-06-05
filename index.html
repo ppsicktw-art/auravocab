@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>AuraVocab App T009</title>
+  <title>AuraVocab App T012</title>
   
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -58,7 +58,8 @@
         check: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>,
         doubleCheck: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" /></svg>,
         error: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>,
-        eye: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+        eye: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+        edit: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path strokeLinecap="round" strokeLinejoin="round" d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
       };
       return <span className={`inline-block ${className}`}>{icons[name] || null}</span>;
     };
@@ -73,7 +74,8 @@
     };
 
     // --- 核心工具函數 ---
-    const TEXT_MODEL = "gemini-2.5-flash-preview-09-2025";
+    // 強制指定正式版模型
+    const TEXT_MODEL = "gemini-2.5-flash"; 
 
     const cleanJsonString = (str) => {
       const match = str.match(/\{[\s\S]*\}/);
@@ -105,11 +107,86 @@
       }
     };
 
-    // --- App 元件 ---
+    // --- 獨立練習元件 (SinglePracticeView) ---
+    function SinglePracticeView({ wordObj, playAudio, onBack }) {
+      const [input, setInput] = useState('');
+      const [isRevealed, setIsRevealed] = useState(false);
+      const [isCorrect, setIsCorrect] = useState(null);
+
+      const handleSubmit = () => {
+        if (!input.trim()) return;
+        const correct = input.trim().toLowerCase() === wordObj.word.toLowerCase();
+        setIsCorrect(correct);
+        setIsRevealed(true);
+        playAudio(wordObj.word);
+      };
+
+      const handleContinue = () => {
+        setInput('');
+        setIsRevealed(false);
+        setIsCorrect(null);
+      };
+
+      return (
+        <div className="max-w-md mx-auto pt-4 animate-fade-in flex flex-col min-h-[60vh] space-y-6">
+          <div className="flex justify-between items-center mb-4">
+            <button onClick={onBack} className="text-slate-400 hover:text-slate-700 font-bold text-sm px-3 py-1 bg-white rounded-full border shadow-sm">← 返回字庫</button>
+            <span className="text-xs font-bold text-indigo-500 bg-indigo-50 px-3 py-1 rounded-full uppercase tracking-widest">單字練習</span>
+          </div>
+
+          <div className="text-center flex-1">
+            {/* 相容舊卡片 translation 變數名稱 */}
+            <h2 className="text-3xl font-black text-slate-800 mb-8 leading-tight">{wordObj.translation || wordObj.zh || wordObj.zhDef}</h2>
+            
+            {!isRevealed ? (
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  <input 
+                    type="text" autoFocus value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSubmit()} 
+                    className="w-full text-center text-3xl p-4 bg-white rounded-2xl shadow-sm outline-none border-2 border-transparent focus:border-indigo-400 transition-colors" 
+                    placeholder="輸入拼寫..." 
+                  />
+                  <button onClick={() => playAudio(wordObj.word)} className="p-3 bg-forest-50 text-forest-700 rounded-2xl hover:bg-forest-100 transition active:scale-95 border border-forest-100 shrink-0 flex items-center justify-center">
+                    <Icon name="speaker" className="w-6 h-6" />
+                  </button>
+                </div>
+                <button onClick={handleSubmit} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-lg hover:bg-slate-800 active:scale-95 transition-transform">送出對決</button>
+              </div>
+            ) : (
+              <div className="space-y-8 animate-fade-in">
+                <div className={`p-6 rounded-3xl border-2 ${isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                   <p className={`font-bold mb-2 ${isCorrect ? 'text-green-600' : 'text-red-500'}`}>{isCorrect ? '🎯 完全正確！' : '❌ 拼寫錯誤'}</p>
+                   
+                   <div className="flex justify-center items-center gap-3">
+                     <h3 className="text-4xl font-black text-slate-900">{wordObj.word}</h3>
+                     <button onClick={() => playAudio(wordObj.word)} className="p-2 bg-white rounded-full shadow-sm text-slate-600 active:scale-90 transition-transform"><Icon name="Volume2" /></button>
+                   </div>
+                   
+                   {!isCorrect && (
+                     <p className="mt-4 text-sm font-bold text-slate-600 bg-white/50 p-2 rounded-xl inline-block">
+                        您的輸入：<span className="text-red-500 ml-1">{input}</span>
+                     </p>
+                   )}
+                </div>
+                
+                <div className="flex gap-3">
+                  <button onClick={handleContinue} className="flex-1 bg-slate-100 text-slate-700 hover:bg-slate-200 py-4 rounded-2xl font-bold transition-colors">繼續練習</button>
+                  <button onClick={onBack} className="flex-1 bg-indigo-600 text-white hover:bg-indigo-700 py-4 rounded-2xl font-bold transition-colors shadow-md">返回</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // --- 主程式進入點 ---
     function App() {
-      const [activeTab, setActiveTab] = useState('search');
+      const [activeTab, setActiveTab] = useState('library');
+      const [searchTriggerWord, setSearchTriggerWord] = useState(''); 
+      const [toast, setToast] = useState(null);
+      const [practiceWordObj, setPracticeWordObj] = useState(null);
       
-      // 自動尋回所有歷史版本的 API Key
       const [apiKey, setApiKey] = useState(() => {
         try {
           const settings = JSON.parse(localStorage.getItem('auraSettings'));
@@ -118,28 +195,18 @@
         return localStorage.getItem('auravocab_key') || localStorage.getItem('auravocab_apikey') || '';
       });
 
-      // 自動尋回所有歷史版本的單字庫 (支援 T008 的 auraVocabList)
       const [library, setLibrary] = useState(() => {
         try {
           const listT008 = localStorage.getItem('auraVocabList');
           if (listT008) return JSON.parse(listT008);
-          
           const listT009 = localStorage.getItem('auravocab_lib');
           if (listT009) return JSON.parse(listT009);
-          
           const listOld = localStorage.getItem('auravocab_library');
           if (listOld) return JSON.parse(listOld);
-          
           return [];
-        } catch {
-          return [];
-        }
+        } catch { return []; }
       });
-      
-      const [searchText, setSearchText] = useState('');
-      const [toast, setToast] = useState(null);
 
-      // 雙重備份：將資料同時存入新舊抽屜，確保未來更新絕不遺失
       useEffect(() => { 
         localStorage.setItem('auravocab_lib', JSON.stringify(library)); 
         localStorage.setItem('auraVocabList', JSON.stringify(library)); 
@@ -153,45 +220,76 @@
       const handleSaveApiKey = (key) => {
         const cleanedKey = key.trim().replace(/<\/?[^>]+(>|$)/g, ""); 
         setApiKey(cleanedKey);
-        // 雙重備份 API Key
         localStorage.setItem('auravocab_key', cleanedKey);
         localStorage.setItem('auraSettings', JSON.stringify({ apiKey: cleanedKey }));
         showToast('金鑰已更新', 'success');
       };
 
       const handleTriggerSearch = (word) => {
-        setSearchText(word);
-        setActiveTab('search');
-        setTimeout(() => document.getElementById('search-trigger-btn')?.click(), 200);
+        const cleanWord = word.replace(/^[.,\/#!$%\^&\*;:{}=\-_`~()?"'“‘]+/g, "").replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'”’]+$/g, "");
+        if (cleanWord) {
+          setSearchTriggerWord(cleanWord);
+          setActiveTab('search');
+        }
       };
 
+      const startPractice = (wordObj) => {
+        setPracticeWordObj(wordObj);
+        setActiveTab('practice');
+      };
+
+      // 計算今日是否到期（核心邏輯修正：使用純日期比較，不帶時間，實現午夜12點自動更新）
       const dueCount = useMemo(() => {
-        const now = Date.now();
-        return library.filter(c => !c.nextDueDate || new Date(c.nextDueDate).getTime() <= now).length;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // 取得今天凌晨 00:00:00 的時間戳
+        const todayTime = today.getTime();
+
+        return library.filter(card => {
+          if (!card.nextDueDate) return true; // 沒被排程過的也算今天要複習
+          
+          const cardDate = new Date(card.nextDueDate);
+          cardDate.setHours(0, 0, 0, 0); // 將卡片的到期日也去掉時間
+          const cardTime = cardDate.getTime();
+
+          return cardTime <= todayTime; // 只要到期日是今天或今天以前，就算到期
+        }).length;
       }, [library]);
 
       return (
         <div className="flex flex-col min-h-screen pb-safe relative">
           <header className="bg-forest-700 text-white py-4 px-6 shadow-md sticky top-0 z-40 flex items-center justify-between">
-            <h1 className="text-xl font-bold tracking-wider flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-wider flex items-baseline gap-2">
               <Icon name="brain" className="w-6 h-6 animate-pulse text-emerald-300" />
-              AuraVocab <span className="text-xs bg-emerald-600 px-2 py-0.5 rounded font-normal self-center ml-1">T009</span>
+              AuraVocab <span className="text-xs bg-emerald-600 px-2 py-0.5 rounded font-normal self-center ml-1">T012</span>
             </h1>
           </header>
 
           <main className="flex-1 overflow-y-auto px-4 py-6 max-w-md mx-auto w-full pb-24">
-            {activeTab === 'search' && <SearchTab apiKey={apiKey} library={library} setLibrary={setLibrary} searchText={searchText} setSearchText={setSearchText} showToast={showToast} />}
-            {activeTab === 'vision' && <VisionTab apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} />}
-            {activeTab === 'library' && <LibraryTab library={library} setLibrary={setLibrary} onTriggerSearch={handleTriggerSearch} showToast={showToast} />}
-            {activeTab === 'quiz' && <QuizTab library={library} setLibrary={setLibrary} showToast={showToast} />}
-            {activeTab === 'settings' && <SettingsTab apiKey={apiKey} onSaveKey={handleSaveApiKey} library={library} setLibrary={setLibrary} showToast={showToast} />}
+            <div className={activeTab === 'search' ? 'block' : 'hidden'}>
+               <SearchTab apiKey={apiKey} library={library} setLibrary={setLibrary} searchTriggerWord={searchTriggerWord} clearTrigger={() => setSearchTriggerWord('')} showToast={showToast} />
+            </div>
+            <div className={activeTab === 'vision' ? 'block' : 'hidden'}>
+               <VisionTab apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} />
+            </div>
+            <div className={activeTab === 'library' ? 'block' : 'hidden'}>
+               <LibraryTab library={library} setLibrary={setLibrary} onTriggerSearch={handleTriggerSearch} showToast={showToast} onPractice={startPractice} />
+            </div>
+            <div className={activeTab === 'practice' ? 'block' : 'hidden'}>
+               {practiceWordObj && <SinglePracticeView wordObj={practiceWordObj} playAudio={playAudio} onBack={() => setActiveTab('library')} />}
+            </div>
+            <div className={activeTab === 'quiz' ? 'block' : 'hidden'}>
+               <QuizTab library={library} setLibrary={setLibrary} showToast={showToast} active={activeTab === 'quiz'} />
+            </div>
+            <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+               <SettingsTab apiKey={apiKey} onSaveKey={handleSaveApiKey} library={library} setLibrary={setLibrary} showToast={showToast} />
+            </div>
           </main>
 
           <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] z-40 pb-safe">
             <div className="max-w-md mx-auto flex justify-around items-center h-16 text-xs text-slate-500 font-medium">
               <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'search' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="search" className="w-5 h-5" /><span>查詢</span></button>
               <button onClick={() => setActiveTab('vision')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'vision' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="camera" className="w-5 h-5" /><span>圖片萃取</span></button>
-              <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'library' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="book" className="w-5 h-5" /><span>字庫</span></button>
+              <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'library' || activeTab === 'practice' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="book" className="w-5 h-5" /><span>字庫</span></button>
               <button onClick={() => setActiveTab('quiz')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'quiz' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}>
                 <div className="relative">
                   <Icon name="brain" className="w-5 h-5" />
@@ -217,49 +315,50 @@
     }
 
     // --- 1. 查詢分頁 ---
-    function SearchTab({ apiKey, library, setLibrary, searchText, setSearchText, showToast }) {
+    function SearchTab({ apiKey, library, setLibrary, searchTriggerWord, clearTrigger, showToast }) {
+      const [searchText, setSearchText] = useState('');
       const [loading, setLoading] = useState(false);
       const [result, setResult] = useState(null);
 
-      const handleSearch = async (e) => {
+      useEffect(() => {
+        if (searchTriggerWord) {
+          setSearchText(searchTriggerWord);
+          handleSearch(null, searchTriggerWord);
+          clearTrigger();
+        }
+      }, [searchTriggerWord]);
+
+      const handleSearch = async (e, wordToSearch = searchText) => {
         if (e) e.preventDefault();
-        const trimmed = searchText.trim();
+        const trimmed = wordToSearch.trim();
         if (!trimmed) return;
         if (!apiKey) return showToast('請先至設定分頁輸入您的 API 金鑰！', 'error');
 
         setLoading(true);
         setResult(null);
         try {
-          const prompt = `您是一個專業的高效英語翻譯官。
-請精準、簡明地翻譯這個單字或片語: "${trimmed}"。
-
-請僅以 JSON 格式回傳，格式必須嚴格如下，不可帶有任何 markdown (\`\`\`) 或其他包裝文字：
+          const prompt = `您是一個專業的高效英語翻譯官。請精準、簡明地翻譯這個單字或片語: "${trimmed}"。請僅以 JSON 格式回傳，格式必須嚴格如下：
 {
   "word": "${trimmed}",
-  "pronunciation": "KK音標(若為片語請留下空字串)",
+  "pronunciation": "KK音標",
   "translation": "極簡精準繁體中文翻譯",
-  "exampleEn": "一行最實用的每日生活英文例句",
-  "exampleZh": "該例句對應的流暢繁體中文翻譯",
-  "type": "以 word 或 phrase 區分其屬性"
-}
-
-關鍵限制：
-1. 嚴禁回傳任何英英定義 (enDef)。
-2. 回傳必須僅為一個標準的 JSON。`;
-
+  "exampleEn": "一行實用英文例句",
+  "exampleZh": "例句的繁體中文翻譯",
+  "type": "word 或 phrase"
+}`;
           const responseData = await fetchWithRetry(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } })
             }
           );
-          const parsed = JSON.parse(responseData.candidates[0].content.parts[0].text);
+          const parsed = JSON.parse(cleanJsonString(responseData.candidates[0].content.parts[0].text));
           setResult(parsed);
           playAudio(parsed.word); 
         } catch (err) {
-          showToast('連線超時或網路訊號不穩，請檢查網路後再試。', 'error');
+          showToast(`查詢失敗: ${err.message}`, 'error');
         } finally { setLoading(false); }
       };
 
@@ -292,7 +391,7 @@
                 <span className="text-xs font-semibold px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg">{result.type === 'phrase' ? '片語' : '單字'}</span>
               </div>
               <div className="border-t border-slate-100 pt-4 space-y-3">
-                <div><span className="text-xs text-slate-400 font-bold tracking-wider">中文翻譯</span><p className="text-lg font-bold text-slate-700 mt-1">{result.translation}</p></div>
+                <div><span className="text-xs text-slate-400 font-bold tracking-wider">中文翻譯</span><p className="text-lg font-bold text-slate-700 mt-1">{result.translation || result.zh || result.zhDef}</p></div>
               </div>
               <button onClick={handleSave} className="w-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition active:scale-95"><Icon name="doubleCheck" className="w-5 h-5 text-emerald-600" /><span>儲存到單字庫</span></button>
             </div>
@@ -329,33 +428,23 @@
         try {
           const results = [];
           for (const img of images) {
-            const prompt = `您是一位英語學習專家與文字掃描秘書。
-請仔細閱讀圖片中的英文字詞，此圖片屬於 "${ocrMode === 'phrase' ? '片語 (Phrase/Idioms)' : '單字 (Vocabulary)'}" 類別。
+            const prompt = `您是一位英語學習專家與文字掃描秘書。請仔細閱讀圖片中的英文字詞，此圖片屬於 "${ocrMode === 'phrase' ? '片語' : '單字'}" 類別。
+1. 若圖中已有翻譯與例句，請直接抄寫。
+2. 若無，請自行補充。
+回傳單一 JSON 物件：{ "items": [ { "word": "...", "pronunciation": "...", "translation": "...", "exampleEn": "...", "exampleZh": "...", "type": "${ocrMode}" } ] }`;
 
-【核心原則 - 抄寫首要】
-1. 如果圖片中已經寫到了中文翻譯、或英文例句與中文翻譯，您必須「直接抄寫」圖片中的文字內容，不要擅自創作！
-2. 如果圖片中僅有單字本身，沒有例句，請自行提供最簡要的 KK音標、繁體中文翻譯，以及一句日常生活英文例句，並附上其繁體中文翻譯。
-
-【核心限制】
-1. 絕對不要生成任何英英定義 (enDef)。
-2. 回傳必須僅為一個包含單一 JSON 陣列的物件，不可帶有任何 markdown：
-{
-  "items": [
-    { "word": "英文單字或片語", "pronunciation": "KK音標", "translation": "繁體中文", "exampleEn": "實用英文例句", "exampleZh": "繁體中文翻譯", "type": "${ocrMode}" }
-  ]
-}`;
             const responseData = await fetchWithRetry(
-              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+              `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [ { text: prompt }, { inlineData: { mimeType: "image/png", data: img.base64 } } ] }], generationConfig: { responseMimeType: "application/json" } }) }
             );
-            const parsed = JSON.parse(responseData.candidates[0].content.parts[0].text);
+            const parsed = JSON.parse(cleanJsonString(responseData.candidates[0].content.parts[0].text));
             if (parsed && parsed.items) results.push(...parsed.items);
           }
           setScannedResults(results);
           setImages([]);
           showToast(`萃取完成！共發現 ${results.length} 個字詞`, 'success');
         } catch (err) {
-          showToast('連線逾時，可能部分請求受阻，請稍候重試。', 'error');
+          showToast(`掃描中斷: ${err.message}`, 'error');
         } finally { setLoading(false); }
       };
 
@@ -383,16 +472,13 @@
           {images.length > 0 && (
             <div className="grid grid-cols-4 gap-2">
               {images.map((img, idx) => (
-                <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-100">
-                  <img src={img.preview} alt="preview" className="object-cover w-full h-full" />
-                  <button onClick={() => handleRemoveImage(idx)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 shadow hover:bg-red-600"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button>
-                </div>
+                <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-100"><img src={img.preview} className="object-cover w-full h-full" /><button onClick={() => handleRemoveImage(idx)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 shadow"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button></div>
               ))}
             </div>
           )}
           {images.length > 0 && (
-            <button onClick={handleScan} disabled={loading} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 shadow active:scale-95 disabled:opacity-50 transition">
-              {loading ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <><Icon name="brain" className="w-5 h-5" /><span>開始高效掃描 ({images.length}張)</span></>}
+            <button onClick={handleScan} disabled={loading} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-xl shadow transition">
+              {loading ? <div className="mx-auto w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : "開始高效掃描"}
             </button>
           )}
           {scannedResults.length > 0 && (
@@ -405,9 +491,9 @@
                       <div className="flex items-center gap-1"><h4 className="text-lg font-bold text-slate-800">{item.word}</h4><button onClick={() => playAudio(item.word)} className="p-1 hover:bg-slate-100 rounded-full transition"><Icon name="speaker" className="w-4 h-4 text-forest-700" /></button></div>
                       {item.pronunciation && <span className="text-xs font-mono text-slate-400">{item.pronunciation}</span>}
                     </div>
-                    <button onClick={() => handleSaveScanned(item, idx)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition shadow active:scale-95"><Icon name="check" className="w-3.5 h-3.5" /><span>儲存</span></button>
+                    <button onClick={() => handleSaveScanned(item, idx)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow"><Icon name="check" className="w-3.5 h-3.5" /><span>儲存</span></button>
                   </div>
-                  <div><span className="text-xs text-slate-400 font-semibold block">中文翻譯</span><p className="text-sm font-bold text-slate-700 mt-0.5">{item.translation}</p></div>
+                  <div><span className="text-xs text-slate-400 font-semibold block">中文翻譯</span><p className="text-sm font-bold text-slate-700 mt-0.5">{item.translation || item.zh || item.zhDef}</p></div>
                 </div>
               ))}
             </div>
@@ -417,7 +503,7 @@
     }
 
     // --- 3. 字庫與即點即查分頁 ---
-    function LibraryTab({ library, setLibrary, onTriggerSearch, showToast }) {
+    function LibraryTab({ library, setLibrary, onTriggerSearch, showToast, onPractice }) {
       const [filter, setFilter] = useState('all');
       const [searchTerm, setSearchTerm] = useState('');
 
@@ -439,7 +525,7 @@
       const filteredList = useMemo(() => {
         return library.filter(card => {
           const matchesFilter = filter === 'all' || card.type === filter;
-          const matchesSearch = card.word.toLowerCase().includes(searchTerm.toLowerCase()) || card.translation.includes(searchTerm);
+          const matchesSearch = card.word.toLowerCase().includes(searchTerm.toLowerCase()) || (card.translation||card.zh||card.zhDef||'').includes(searchTerm);
           return matchesFilter && matchesSearch;
         });
       }, [library, filter, searchTerm]);
@@ -471,7 +557,7 @@
                       <button onClick={() => handleDelete(card.id)} className="text-red-400 hover:text-red-500 p-1.5 bg-red-50 rounded-lg transition active:scale-90"><Icon name="trash" className="w-4 h-4" /></button>
                     </div>
                   </div>
-                  <div className="bg-forest-50/50 p-3 rounded-xl border border-forest-50"><p className="text-base font-bold text-slate-700">{card.translation}</p></div>
+                  <div className="bg-forest-50/50 p-3 rounded-xl border border-forest-50"><p className="text-base font-bold text-slate-700">{card.translation || card.zh || card.zhDef}</p></div>
                   {card.exampleEn && (
                     <div className="border-t border-slate-100 pt-3 space-y-2">
                       <div className="flex items-start justify-between gap-1">
@@ -481,6 +567,12 @@
                       <p className="text-xs font-bold text-slate-400">{card.exampleZh}</p>
                     </div>
                   )}
+                  {/* 新增的單字庫「練習」按鈕 */}
+                  <div className="border-t border-slate-50 pt-2 flex justify-end">
+                    <button onClick={() => onPractice(card)} className="px-4 py-1.5 text-xs font-bold text-forest-700 bg-forest-50 hover:bg-forest-100 rounded-lg transition active:scale-95 flex items-center gap-1.5">
+                      <Icon name="edit" className="w-3.5 h-3.5" /> 練習
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -489,36 +581,47 @@
       );
     }
 
-    // --- 4. 🧠 測驗與 Anki (包含長度提示功能) ---
-    function QuizTab({ library, setLibrary, showToast }) {
+    // --- 4. 🧠 測驗與 Anki (QuizTab) 午夜更新邏輯 ---
+    function QuizTab({ library, setLibrary, showToast, active }) {
+      const [dueCards, setDueCards] = useState([]);
       const [currentCard, setCurrentCard] = useState(null);
       const [showAnswer, setShowAnswer] = useState(false);
       const [userInput, setUserInput] = useState('');
       const [isCorrect, setIsCorrect] = useState(null);
-      
-      // 控制提示狀態
       const [showHint, setShowHint] = useState(false);
 
-      const queue = useMemo(() => {
-        const now = Date.now();
-        return library.filter(card => {
-          if (!card.nextDueDate) return true;
-          return new Date(card.nextDueDate).getTime() <= now;
-        });
-      }, [library]);
-
+      // (T012 新核心)：以「天」為單位的到期判斷
       useEffect(() => {
-        if (queue.length > 0 && !currentCard) {
-          const random = queue[Math.floor(Math.random() * queue.length)];
-          setCurrentCard(random);
-          setShowAnswer(false);
-          setUserInput('');
-          setIsCorrect(null);
-          setShowHint(false); // 換題自動隱藏提示
-        } else if (queue.length === 0) {
-          setCurrentCard(null);
+        if (!active) return;
+        
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // 取今天凌晨的時間戳
+        const todayTime = today.getTime();
+
+        const activeDue = library.filter(card => {
+          if (!card.nextDueDate) return true; 
+          const cardDate = new Date(card.nextDueDate);
+          cardDate.setHours(0, 0, 0, 0); // 取卡片到期日凌晨的時間戳
+          const cardTime = cardDate.getTime();
+          
+          return cardTime <= todayTime; // 只要是今天或以前的都算到期
+        });
+
+        setDueCards(activeDue);
+        
+        // 隨機抽題，如果目前的卡片不在待測清單中，就抽一張新的
+        if (!currentCard || !activeDue.find(c => c.id === currentCard.id)) {
+           if (activeDue.length > 0) {
+             setCurrentCard(activeDue[Math.floor(Math.random() * activeDue.length)]);
+             setShowAnswer(false);
+             setUserInput('');
+             setIsCorrect(null);
+             setShowHint(false);
+           } else {
+             setCurrentCard(null);
+           }
         }
-      }, [queue, currentCard]);
+      }, [library, active]);
 
       const handleCheckAnswer = () => {
         const cleanUser = userInput.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "");
@@ -540,28 +643,38 @@
             else if (rating === 2) { interval = repetitions === 1 ? 3 : Math.round(interval * ease); } 
             else if (rating === 3) { interval = repetitions === 1 ? 7 : Math.round(interval * ease * 1.35); ease += 0.15; }
           }
-          const nextDueDate = rating === 0 ? new Date(Date.now() + 10 * 60 * 1000).toISOString() : new Date(Date.now() + interval * 24 * 60 * 60 * 1000).toISOString();
-          return { ...card, interval, ease, repetitions, nextDueDate };
+          
+          // 計算新到期日：0代表今天稍後，其他代表N天後的午夜
+          let newNextDate = new Date();
+          if (interval === 0) {
+             // 如果是 0，保留當下時間 (不會被上面的去頭去尾邏輯濾掉)
+             newNextDate = new Date(Date.now() + 10 * 60 * 1000); 
+          } else {
+             newNextDate.setDate(newNextDate.getDate() + interval);
+          }
+          
+          return { ...card, interval, ease, repetitions, nextDueDate: newNextDate.toISOString() };
         });
+        
         setLibrary(updated);
-        setCurrentCard(null);
-        showToast('記憶參數已更新！', 'success');
+        showToast('排程更新！', 'success');
       };
 
-      // 產生單字/片語結構底線的輔助函數
       const generateHintPattern = (word) => {
         return word.split('').map(char => {
-          if (char === ' ') return '  '; // 保留多個空白作為片語間距
-          if (/[a-zA-Z]/.test(char)) return '_ '; // 英文字母轉換為底線
-          return char + ' '; // 保留連字符或其他標點
+          if (char === ' ') return '  ';
+          if (/[a-zA-Z]/.test(char)) return '_ ';
+          return char + ' ';
         }).join('');
       };
 
+      if (library.length === 0) return <div className="text-center py-20 text-slate-500 font-bold">字庫還沒有單字，請先去查詢或萃取喔！</div>;
+      
       if (!currentCard) {
         return (
           <div className="bg-white rounded-2xl p-8 border border-slate-100 shadow-sm text-center space-y-4 animate-fade-in mt-10">
-            <Icon name="doubleCheck" className="w-16 h-16 text-emerald-600 mx-auto" />
-            <h2 className="text-2xl font-bold text-forest-800">🎉 今日複習完成！</h2>
+            <div className="text-6xl mb-4">🎉</div>
+            <h2 className="text-2xl font-bold text-forest-800">今日複習完成！</h2>
             <p className="text-slate-500 font-medium">您的大腦已充飽了今日所需的能量。請維持這個節奏，明天繼續收割成果！</p>
           </div>
         );
@@ -571,27 +684,23 @@
         <div className="space-y-6 animate-fade-in">
           <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 space-y-6 mt-4">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <span className="text-xs font-bold text-slate-400">🧠 待複習字卡: {queue.length} 張</span>
+              <span className="text-xs font-bold text-slate-400">🧠 今日剩餘卡片: {dueCards.length} 張</span>
               <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-bold">{currentCard.type === 'phrase' ? '片語' : '單字'}</span>
             </div>
 
             <div className="text-center py-4 space-y-3">
               <span className="text-xs text-slate-400 font-bold tracking-wider">中文提示</span>
               <div className="flex items-center justify-center gap-2">
-                <h3 className="text-2xl font-extrabold text-forest-800 tracking-wide">{currentCard.translation}</h3>
+                <h3 className="text-2xl font-extrabold text-forest-800 tracking-wide">{currentCard.translation || currentCard.zh || currentCard.zhDef || "無中文提示"}</h3>
                 <button onClick={() => playAudio(currentCard.word)} className="text-forest-600 hover:text-forest-700 p-2 bg-forest-50 hover:bg-forest-100 rounded-full transition active:scale-90" title="播放發音提示"><Icon name="speaker" className="w-5 h-5" /></button>
               </div>
             </div>
 
             {!showAnswer && (
               <div className="space-y-4 border-t border-slate-50 pt-4">
-                {/* 提示按鈕與動態顯示結構區 */}
                 <div className="flex flex-col items-center gap-2">
                   {!showHint ? (
-                    <button 
-                      onClick={() => setShowHint(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-full transition active:scale-95"
-                    >
+                    <button onClick={() => setShowHint(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-full transition active:scale-95">
                       <Icon name="eye" className="w-4 h-4" /> 顯示長度提示
                     </button>
                   ) : (
@@ -602,23 +711,13 @@
                 </div>
 
                 <div className="flex gap-2">
-                  <input 
-                    type="text"
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    placeholder="試著在這裡拼寫英文..."
-                    className="w-full text-center text-lg font-semibold px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-forest-600 shadow-inner"
-                    onKeyDown={(e) => e.key === 'Enter' && handleCheckAnswer()}
-                  />
-                  {/* 輸入框旁邊加入額外聽音小喇叭 */}
+                  <input type="text" value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="試著在這裡拼寫英文..." className="w-full text-center text-lg font-semibold px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-forest-600 shadow-inner" onKeyDown={(e) => e.key === 'Enter' && handleCheckAnswer()} />
                   <button onClick={() => playAudio(currentCard.word)} className="p-3 bg-forest-50 text-forest-700 rounded-2xl hover:bg-forest-100 transition active:scale-95 border border-forest-100 shrink-0 flex items-center justify-center">
                     <Icon name="speaker" className="w-6 h-6" />
                   </button>
                 </div>
                 
-                <button onClick={handleCheckAnswer} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-2xl shadow active:scale-95 transition">
-                  💡 檢查答案
-                </button>
+                <button onClick={handleCheckAnswer} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-2xl shadow active:scale-95 transition">💡 檢查答案</button>
               </div>
             )}
 
@@ -640,20 +739,16 @@
 
                 <div className="grid grid-cols-4 gap-2">
                   <button onClick={() => handleAnkiRate(0)} className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">再次</span>
-                    <span className="text-[10px] font-medium text-red-500">10分鐘</span>
+                    <span className="text-sm font-bold">再次</span><span className="text-[10px] font-medium text-red-500">10分鐘</span>
                   </button>
                   <button onClick={() => handleAnkiRate(1)} className="bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">困難</span>
-                    <span className="text-[10px] font-medium text-orange-500">1天</span>
+                    <span className="text-sm font-bold">困難</span><span className="text-[10px] font-medium text-orange-500">1天</span>
                   </button>
                   <button onClick={() => handleAnkiRate(2)} className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">良好</span>
-                    <span className="text-[10px] font-medium text-emerald-500">3天</span>
+                    <span className="text-sm font-bold">良好</span><span className="text-[10px] font-medium text-emerald-500">3天</span>
                   </button>
                   <button onClick={() => handleAnkiRate(3)} className="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">簡單</span>
-                    <span className="text-[10px] font-medium text-blue-500">7天</span>
+                    <span className="text-sm font-bold">簡單</span><span className="text-[10px] font-medium text-blue-500">7天</span>
                   </button>
                 </div>
               </div>
@@ -663,7 +758,7 @@
       );
     }
 
-    // --- 5. ⚙️ 設定分頁 ---
+    // --- 5. ⚙️ 設定分頁 (SettingsTab) ---
     function SettingsTab({ apiKey, onSaveKey, library, setLibrary, showToast }) {
       const [keyInput, setKeyInput] = useState(apiKey);
       const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -709,35 +804,19 @@
       return (
         <div className="space-y-6 animate-fade-in bg-white rounded-3xl p-6 border border-slate-100 shadow-sm mt-4">
           <h2 className="text-lg font-bold text-forest-800 border-b border-slate-100 pb-3">⚙️ 系統與金鑰設定</h2>
-
           <div className="space-y-2">
             <label className="text-sm font-bold text-slate-500 block">Gemini API 金鑰</label>
-            <input 
-              type="password"
-              value={keyInput}
-              onChange={(e) => setKeyInput(e.target.value)}
-              placeholder="請輸入 AIzaSy... 開頭金鑰"
-              className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:border-forest-600 font-mono text-sm"
-            />
-            <button 
-              onClick={() => onSaveKey(keyInput.trim())}
-              className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-2.5 rounded-xl active:scale-95 transition text-sm shadow"
-            >
-              儲存金鑰
-            </button>
+            <input type="password" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} placeholder="請輸入 AIzaSy... 開頭金鑰" className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:border-forest-600 font-mono text-sm" />
+            <button onClick={() => onSaveKey(keyInput.trim())} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-2.5 rounded-xl active:scale-95 transition text-sm shadow">儲存金鑰</button>
           </div>
-
           <div className="border-t border-slate-100 pt-6 space-y-4">
             <h3 className="text-sm font-bold text-slate-500 block">📦 資料管理與備份</h3>
-            
             <div className="grid grid-cols-2 gap-2">
               <button onClick={handleExport} className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold transition active:scale-95">💾 導出備份 JSON</button>
               <label className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold text-center cursor-pointer transition active:scale-95">
-                <span>📂 匯入備份 JSON</span>
-                <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                <span>📂 匯入備份 JSON</span><input type="file" accept=".json" onChange={handleImport} className="hidden" />
               </label>
             </div>
-
             {!showClearConfirm ? (
               <button onClick={() => setShowClearConfirm(true)} className="w-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 py-3 rounded-xl text-xs font-bold transition active:scale-95">⚠️ 清空所有字庫與 Anki 進度</button>
             ) : (
@@ -759,18 +838,3 @@
   </script>
 </body>
 </html>
-```
-
-### 🌟 這次的「提示」功能亮點：
-
-1.  **「顯示長度提示」按鈕**：
-    在「測驗 (Quiz)」的輸入框上方，我加入了一個帶有眼睛圖示 (`Icon name="eye"`) 的琥珀色小按鈕。它預設會溫柔地提醒您可以獲得輔助。
-2.  **精準底線結構 (Structure Pattern)**：
-    點擊後，按鈕會展開為一段 `monospace`（等寬字型）的底線提示！
-    *   它會將所有字母轉換為 `_`，並保留原有的空白。
-    *   例如：片語 `off limits` 點擊提示後，會精準展開為：`_ _ _   _ _ _ _ _ _`。這在保留挑戰性的同時，為大腦提供了最有力的鷹架。
-3.  **無縫的重置與輸入體驗**：
-    *   每當您完成一題、或是進入下一題時，提示區域會自動縮起，保證畫面的簡潔。
-    *   另外，我同時保留了您要求的「輸入框右側聽音小喇叭」，讓您在展開字數提示的同時，還能輔以聲音，這對單字吸收率是極致的降維打擊！
-
-您可以複製上方這份最新的 `index.html` 覆蓋您的 GitHub 版本，明天早上的高鐵通勤就能親自體驗這個輔助機制了！
