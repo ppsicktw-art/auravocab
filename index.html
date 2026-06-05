@@ -45,7 +45,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    const APP_VERSION = 'T014';
+    const APP_VERSION = 'T015';
 
     // --- 圖示庫 ---
     const Icon = ({ name, size = 24, className = "" }) => {
@@ -644,10 +644,10 @@
 
       const handleRemoveImage = (index) => setImages(prev => prev.filter((_, i) => i !== index));
 
-      const dedupeWords = (words) => {
+      const dedupeItems = (items) => {
         const seen = new Set();
-        return words.filter(w => {
-          const key = w.trim().toLowerCase();
+        return items.filter(item => {
+          const key = (item.word || '').trim().toLowerCase();
           if (!key || seen.has(key)) return false;
           seen.add(key);
           return true;
@@ -662,6 +662,70 @@
         ...createSrsFields(),
       });
 
+      const scanImage = async (img, prompt) => {
+        const responseData = await fetchWithRetry(
+          `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: img.mimeType, data: img.base64 } }] }], generationConfig: { responseMimeType: "application/json" } }) }
+        );
+        return cleanJsonString(responseData.candidates[0].content.parts[0].text);
+      };
+
+      const scanPhrases = async () => {
+        const allItems = [];
+        for (const img of images) {
+          const prompt = `您是英語片語卡 OCR 助手。圖片為「深綠色背景、白色文字」的片語學習卡，格式通常為：
+第1行：英文片語
+第2行：繁體中文翻譯
+第3行：英文例句
+第4行：例句中文翻譯
+
+請直接抄寫圖中內容，不要改寫、不要自行新增或替換例句。
+若一張圖有多組片語，每組各輸出一筆。
+僅回傳 JSON：{ "items": [ { "word": "英文片語", "translation": "中文翻譯", "exampleEn": "英文例句", "exampleZh": "例句中文", "pronunciation": "", "type": "phrase" } ] }`;
+
+          const parsed = await scanImage(img, prompt);
+          if (parsed?.items) allItems.push(...parsed.items.filter(i => i?.word?.trim()));
+        }
+        return allItems.map(item => ({ ...item, type: 'phrase' }));
+      };
+
+      const scanWords = async () => {
+        const allItems = [];
+        for (const img of images) {
+          const prompt = `您是英語單字卡 OCR 助手。圖片為「白色卡片」的單字學習卡，格式通常為：
+- 英文單字（左側可能有喇叭圖示，請忽略圖示）
+- KK[...] 與 DJ[...] 音標（合併寫入 pronunciation）
+- 詞性標示（如 a.形容詞、n.名詞，可忽略不輸出）
+- 繁體中文釋義
+
+此格式「沒有例句」，請勿自行補充例句。
+若一張圖有多張單字卡，每張各輸出一筆。
+僅回傳 JSON：{ "items": [ { "word": "英文單字", "pronunciation": "KK[...], DJ[...]", "translation": "繁體中文釋義", "type": "word" } ] }`;
+
+          const parsed = await scanImage(img, prompt);
+          if (parsed?.items) allItems.push(...parsed.items.filter(i => i?.word?.trim()));
+        }
+        return allItems.map(item => ({ ...item, type: 'word', exampleEn: '', exampleZh: '' }));
+      };
+
+      const generateWordExamples = async (words) => {
+        if (!words.length) return {};
+        const prompt = `您是英語教學助理。以下單字已有翻譯與音標，請「僅為每個單字各補充一組實用例句」，不要修改 word、translation、pronunciation。
+單字清單：${JSON.stringify(words.map(w => ({ word: w.word, translation: getTranslation(w), pronunciation: w.pronunciation || '' })))}
+僅回傳 JSON：{ "items": [ { "word": "與清單完全一致", "exampleEn": "英文例句", "exampleZh": "例句繁體中文" } ] }`;
+
+        const responseData = await fetchWithRetry(
+          `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }) }
+        );
+        const parsed = cleanJsonString(responseData.candidates[0].content.parts[0].text);
+        const map = {};
+        (parsed?.items || []).forEach(row => {
+          if (row?.word) map[row.word.trim().toLowerCase()] = row;
+        });
+        return map;
+      };
+
       const handleScan = async () => {
         if (!images.length) return;
         if (!apiKey) return showToast('請先至設定分頁輸入您的 API 金鑰！', 'error');
@@ -669,52 +733,35 @@
         setLoading(true);
         setSkippedCount(0);
         try {
-          const extractedWords = [];
-          const ocrLabel = ocrMode === 'phrase' ? '片語' : '單字';
+          let extracted = ocrMode === 'phrase' ? await scanPhrases() : await scanWords();
+          extracted = dedupeItems(extracted);
 
-          for (const img of images) {
-            const ocrPrompt = `您是 OCR 文字掃描助手。請仔細閱讀圖片，擷取所有英文${ocrLabel}（不含中文翻譯）。
-僅回傳 JSON：{ "words": ["word1", "word2"] }
-規則：保留圖中原文拼寫；去重；忽略頁碼與純數字。`;
-
-            const responseData = await fetchWithRetry(
-              `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
-              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [ { text: ocrPrompt }, { inlineData: { mimeType: img.mimeType, data: img.base64 } } ] }], generationConfig: { responseMimeType: "application/json" } }) }
-            );
-            const parsed = cleanJsonString(responseData.candidates[0].content.parts[0].text);
-            if (parsed?.words && Array.isArray(parsed.words)) {
-              extractedWords.push(...parsed.words.filter(w => typeof w === 'string' && w.trim()));
-            }
-          }
-
-          const uniqueWords = dedupeWords(extractedWords);
-          const newWords = uniqueWords.filter(w => !isWordInLibrary(w, library));
-          const skipped = uniqueWords.length - newWords.length;
+          const newItems = extracted.filter(item => !isWordInLibrary(item.word, library));
+          const skipped = extracted.length - newItems.length;
           setSkippedCount(skipped);
 
-          if (newWords.length === 0) {
+          if (newItems.length === 0) {
             setScannedResults([]);
             setImages([]);
-            showToast(skipped > 0 ? `掃描完成！${skipped} 個字詞已在字庫，無需翻譯` : '掃描完成，但未發現有效字詞', skipped > 0 ? 'info' : 'error');
+            showToast(skipped > 0 ? `掃描完成！${skipped} 個字詞已在字庫` : '掃描完成，但未發現有效字詞', skipped > 0 ? 'info' : 'error');
             return;
           }
 
-          const translatePrompt = `您是專業英語翻譯官。請為以下英文${ocrLabel}補充學習資訊，字詞清單：${JSON.stringify(newWords)}
-請僅回傳 JSON：{ "items": [ { "word": "...", "pronunciation": "KK音標", "translation": "繁體中文翻譯", "exampleEn": "英文例句", "exampleZh": "例句中文", "type": "${ocrMode}" } ] }
-每個字詞皆需一筆，word 必須與清單原文完全一致。`;
+          let results = newItems;
+          if (ocrMode === 'word') {
+            const exampleMap = await generateWordExamples(newItems);
+            results = newItems.map(item => {
+              const ex = exampleMap[item.word.trim().toLowerCase()];
+              return ex ? { ...item, exampleEn: ex.exampleEn || '', exampleZh: ex.exampleZh || '' } : item;
+            });
+          }
 
-          const translateData = await fetchWithRetry(
-            `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: translatePrompt }] }], generationConfig: { responseMimeType: "application/json" } }) }
-          );
-          const translated = cleanJsonString(translateData.candidates[0].content.parts[0].text);
-          const items = (translated?.items || []).filter(item => item?.word && !isWordInLibrary(item.word, library));
-
-          setScannedResults(items);
+          setScannedResults(results);
           setImages([]);
+          const label = ocrMode === 'phrase' ? '片語' : '單字';
           const msg = skipped > 0
-            ? `新發現 ${items.length} 個字詞，已跳過 ${skipped} 個字庫重複（未翻譯）`
-            : `萃取完成！共發現 ${items.length} 個字詞`;
+            ? `新發現 ${results.length} 個${label}，已跳過 ${skipped} 個字庫重複`
+            : `萃取完成！共發現 ${results.length} 個${label}`;
           showToast(msg, 'success');
         } catch (err) {
           showToast(`掃描中斷: ${err.message}`, 'error');
@@ -738,17 +785,24 @@
 
       return (
         <div className="space-y-6 animate-fade-in">
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center justify-between">
-            <span className="text-sm font-bold text-slate-500">掃描模式</span>
-            <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
-              <button onClick={() => setOcrMode('word')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'word' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🔍 單字</button>
-              <button onClick={() => setOcrMode('phrase')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'phrase' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🔗 片語</button>
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-slate-500">掃描模式</span>
+              <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
+                <button onClick={() => setOcrMode('word')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'word' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🔍 單字</button>
+                <button onClick={() => setOcrMode('phrase')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'phrase' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🔗 片語</button>
+              </div>
             </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              {ocrMode === 'phrase'
+                ? '片語模式：適用深綠色片語卡（含翻譯與例句），直接抄寫入庫，不另補例句。'
+                : '單字模式：適用白色單字卡（含音標與釋義、無例句），掃描後 AI 自動補充例句。'}
+            </p>
           </div>
           <div className="border-2 border-dashed border-slate-200 bg-white rounded-2xl p-6 flex flex-col items-center justify-center min-h-[160px] relative">
             <input type="file" multiple accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
             <Icon name="camera" className="w-10 h-10 text-slate-300 mb-2" />
-            <p className="text-sm font-bold text-slate-500">點擊上傳多張截圖</p>
+            <p className="text-sm font-bold text-slate-500">點擊上傳{ocrMode === 'phrase' ? '片語' : '單字'}截圖</p>
           </div>
           {images.length > 0 && (
             <div className="grid grid-cols-4 gap-2">
@@ -771,18 +825,29 @@
                 </button>
               </div>
               {skippedCount > 0 && (
-                <p className="text-xs font-medium text-slate-400 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">已自動跳過 {skippedCount} 個字庫中已有的字詞（未呼叫翻譯）</p>
+                <p className="text-xs font-medium text-slate-400 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">已自動跳過 {skippedCount} 個字庫中已有的字詞</p>
               )}
               {scannedResults.map((item, idx) => (
                 <div key={idx} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-3">
                   <div className="flex justify-between items-start">
                     <div>
-                      <div className="flex items-center gap-1"><h4 className="text-lg font-bold text-slate-800">{item.word}</h4><button onClick={() => playAudio(item.word)} className="p-1 hover:bg-slate-100 rounded-full transition"><Icon name="speaker" className="w-4 h-4 text-forest-700" /></button></div>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <h4 className="text-lg font-bold text-slate-800">{item.word}</h4>
+                        <button onClick={() => playAudio(item.word)} className="p-1 hover:bg-slate-100 rounded-full transition"><Icon name="speaker" className="w-4 h-4 text-forest-700" /></button>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">{item.type === 'phrase' ? '片語' : '單字'}</span>
+                      </div>
                       {item.pronunciation && <span className="text-xs font-mono text-slate-400">{item.pronunciation}</span>}
                     </div>
                     <button onClick={() => handleSaveScanned(item, idx)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow"><Icon name="check" className="w-3.5 h-3.5" /><span>儲存</span></button>
                   </div>
                   <div><span className="text-xs text-slate-400 font-semibold block">中文翻譯</span><p className="text-sm font-bold text-slate-700 mt-0.5">{getTranslation(item)}</p></div>
+                  {item.exampleEn && (
+                    <div className="border-t border-slate-50 pt-2 space-y-1">
+                      <span className="text-xs text-slate-400 font-semibold block">例句</span>
+                      <p className="text-sm text-slate-600 leading-relaxed">{item.exampleEn}</p>
+                      {item.exampleZh && <p className="text-xs font-bold text-slate-400">{item.exampleZh}</p>}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
