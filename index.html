@@ -45,7 +45,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    const APP_VERSION = 'T015';
+    const APP_VERSION = 'T016';
 
     // --- 圖示庫 ---
     const Icon = ({ name, size = 24, className = "" }) => {
@@ -626,7 +626,7 @@
     function VisionTab({ apiKey, library, setLibrary, showToast }) {
       const [loading, setLoading] = useState(false);
       const [images, setImages] = useState([]);
-      const [ocrMode, setOcrMode] = useState('phrase');
+      const [ocrMode, setOcrMode] = useState('smart');
       const [scannedResults, setScannedResults] = useState([]);
       const [skippedCount, setSkippedCount] = useState(0);
 
@@ -689,6 +689,33 @@
         return allItems.map(item => ({ ...item, type: 'phrase' }));
       };
 
+      const scanSmart = async () => {
+        const allItems = [];
+        for (const img of images) {
+          const prompt = `您是 AuraVocab 智慧掃描助手。請分析圖片，自動判斷每筆內容屬於「單字」或「片語」，並擷取對應欄位。
+
+【片語卡特徵】深綠色背景、白色文字，通常含：英文片語 → 中文翻譯 → 英文例句 → 中文例句
+→ type 設為 "phrase"，直接抄寫圖中例句，不要改寫或新增
+
+【單字卡特徵】白色卡片，通常含：英文單字、KK/DJ 音標、詞性、中文釋義，通常「沒有例句」
+→ type 設為 "word"，exampleEn 與 exampleZh 留空字串，不要自行補例句
+
+規則：忽略喇叭圖示；一圖多筆各輸出一筆；無法辨識則略過。
+僅回傳 JSON：{ "items": [ { "word": "...", "pronunciation": "...", "translation": "...", "exampleEn": "...", "exampleZh": "...", "type": "word 或 phrase" } ] }`;
+
+          const parsed = await scanImage(img, prompt);
+          if (parsed?.items) {
+            allItems.push(...parsed.items.filter(i => i?.word?.trim()).map(item => ({
+              ...item,
+              type: item.type === 'phrase' ? 'phrase' : 'word',
+              exampleEn: item.exampleEn || '',
+              exampleZh: item.exampleZh || '',
+            })));
+          }
+        }
+        return allItems;
+      };
+
       const scanWords = async () => {
         const allItems = [];
         for (const img of images) {
@@ -733,9 +760,12 @@
         setLoading(true);
         setSkippedCount(0);
         try {
-          let extracted = ocrMode === 'phrase' ? await scanPhrases() : await scanWords();
-          extracted = dedupeItems(extracted);
+          let extracted;
+          if (ocrMode === 'smart') extracted = await scanSmart();
+          else if (ocrMode === 'phrase') extracted = await scanPhrases();
+          else extracted = await scanWords();
 
+          extracted = dedupeItems(extracted);
           const newItems = extracted.filter(item => !isWordInLibrary(item.word, library));
           const skipped = extracted.length - newItems.length;
           setSkippedCount(skipped);
@@ -747,10 +777,12 @@
             return;
           }
 
+          const wordsNeedingExamples = newItems.filter(i => i.type === 'word' && !i.exampleEn?.trim());
           let results = newItems;
-          if (ocrMode === 'word') {
-            const exampleMap = await generateWordExamples(newItems);
+          if (wordsNeedingExamples.length > 0) {
+            const exampleMap = await generateWordExamples(wordsNeedingExamples);
             results = newItems.map(item => {
+              if (item.type !== 'word' || item.exampleEn?.trim()) return item;
               const ex = exampleMap[item.word.trim().toLowerCase()];
               return ex ? { ...item, exampleEn: ex.exampleEn || '', exampleZh: ex.exampleZh || '' } : item;
             });
@@ -758,10 +790,19 @@
 
           setScannedResults(results);
           setImages([]);
-          const label = ocrMode === 'phrase' ? '片語' : '單字';
-          const msg = skipped > 0
-            ? `新發現 ${results.length} 個${label}，已跳過 ${skipped} 個字庫重複`
-            : `萃取完成！共發現 ${results.length} 個${label}`;
+          const wordCount = results.filter(i => i.type === 'word').length;
+          const phraseCount = results.filter(i => i.type === 'phrase').length;
+          let msg;
+          if (ocrMode === 'smart') {
+            msg = skipped > 0
+              ? `智慧掃描：${wordCount} 單字、${phraseCount} 片語，跳過 ${skipped} 個重複`
+              : `智慧掃描完成！${wordCount} 單字、${phraseCount} 片語`;
+          } else {
+            const label = ocrMode === 'phrase' ? '片語' : '單字';
+            msg = skipped > 0
+              ? `新發現 ${results.length} 個${label}，已跳過 ${skipped} 個字庫重複`
+              : `萃取完成！共發現 ${results.length} 個${label}`;
+          }
           showToast(msg, 'success');
         } catch (err) {
           showToast(`掃描中斷: ${err.message}`, 'error');
@@ -786,23 +827,27 @@
       return (
         <div className="space-y-6 animate-fade-in">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-bold text-slate-500">掃描模式</span>
-              <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
-                <button onClick={() => setOcrMode('word')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'word' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🔍 單字</button>
-                <button onClick={() => setOcrMode('phrase')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'phrase' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🔗 片語</button>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-bold text-slate-500 shrink-0">掃描模式</span>
+              <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+                <button onClick={() => setOcrMode('smart')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'smart' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🧠 智慧</button>
+                <button onClick={() => setOcrMode('word')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'word' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🔍 單字</button>
+                <button onClick={() => setOcrMode('phrase')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${ocrMode === 'phrase' ? 'bg-forest-700 text-white' : 'text-slate-600'}`}>🔗 片語</button>
               </div>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              {ocrMode === 'phrase'
-                ? '片語模式：適用深綠色片語卡（含翻譯與例句），直接抄寫入庫，不另補例句。'
-                : '單字模式：適用白色單字卡（含音標與釋義、無例句），掃描後 AI 自動補充例句。'}
+              {ocrMode === 'smart'
+                ? '智慧掃描：自動辨識綠色片語卡或白色單字卡，分類擷取；單字自動補例句，片語保留原例句。'
+                : ocrMode === 'phrase'
+                  ? '片語模式：適用深綠色片語卡（含翻譯與例句），直接抄寫入庫，不另補例句。'
+                  : '單字模式：適用白色單字卡（含音標與釋義、無例句），掃描後 AI 自動補充例句。'}
             </p>
           </div>
           <div className="border-2 border-dashed border-slate-200 bg-white rounded-2xl p-6 flex flex-col items-center justify-center min-h-[160px] relative">
             <input type="file" multiple accept="image/*" onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
             <Icon name="camera" className="w-10 h-10 text-slate-300 mb-2" />
-            <p className="text-sm font-bold text-slate-500">點擊上傳{ocrMode === 'phrase' ? '片語' : '單字'}截圖</p>
+            <p className="text-sm font-bold text-slate-500">點擊上傳{ocrMode === 'smart' ? '' : ocrMode === 'phrase' ? '片語' : '單字'}截圖</p>
+            {ocrMode === 'smart' && <p className="text-xs text-slate-400 mt-1">可混合上傳單字卡與片語卡</p>}
           </div>
           {images.length > 0 && (
             <div className="grid grid-cols-4 gap-2">
@@ -813,7 +858,7 @@
           )}
           {images.length > 0 && (
             <button onClick={handleScan} disabled={loading} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-xl shadow transition">
-              {loading ? <div className="mx-auto w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : "開始高效掃描"}
+              {loading ? <div className="mx-auto w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : ocrMode === 'smart' ? '開始智慧掃描' : '開始高效掃描'}
             </button>
           )}
           {scannedResults.length > 0 && (
