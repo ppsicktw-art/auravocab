@@ -45,7 +45,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    const APP_VERSION = 'T012';
+    const APP_VERSION = 'T013';
 
     // --- 圖示庫 ---
     const Icon = ({ name, size = 24, className = "" }) => {
@@ -80,13 +80,164 @@
 
     const getTranslation = (card) => card?.translation || card?.zh || card?.zhDef || '';
 
+    // --- Anki 式 SRS 排程 (T013) ---
+    const LEARNING_STEPS = [1, 10];
+    const RELEARNING_STEPS = [10];
+    const GRADUATING_INTERVAL = 1;
+    const EASY_INTERVAL_NEW = 4;
+    const MIN_EASE = 1.3;
+    const STATE_LABELS = { new: '新卡', learning: '學習中', review: '複習', relearning: '重學' };
+    const CARD_PRIORITY = { relearning: 0, learning: 1, new: 2, review: 3 };
+
+    const createSrsFields = () => ({
+      state: 'new', learningStep: 0, lapses: 0,
+      interval: 0, ease: 2.5, repetitions: 0, nextDueDate: null,
+    });
+
+    const scheduleAfterMinutes = (minutes) =>
+      new Date(Date.now() + minutes * 60 * 1000).toISOString();
+
+    const scheduleAfterDays = (days) => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + days);
+      return d.toISOString();
+    };
+
+    const migrateCard = (card) => {
+      if (card.state) return card;
+      let state = 'new';
+      let learningStep = 0;
+      if (card.repetitions > 0 && card.interval > 0) {
+        state = 'review';
+      } else if (card.nextDueDate && card.interval === 0 && card.repetitions === 0) {
+        const remaining = new Date(card.nextDueDate).getTime() - Date.now();
+        if (remaining > 0 && remaining <= 24 * 60 * 60 * 1000) {
+          state = 'learning';
+          learningStep = 1;
+        }
+      }
+      return {
+        ...card,
+        state,
+        learningStep,
+        lapses: card.lapses || 0,
+        interval: card.interval ?? 0,
+        ease: card.ease ?? 2.5,
+        repetitions: card.repetitions ?? 0,
+      };
+    };
+
     const isCardDue = (card, now = new Date()) => {
-      if (!card.nextDueDate) return true;
-      return new Date(card.nextDueDate).getTime() <= now.getTime();
+      const c = migrateCard(card);
+      if (c.state === 'new' || !c.nextDueDate) return true;
+      return new Date(c.nextDueDate).getTime() <= now.getTime();
     };
 
     const getDueCards = (library, now = new Date()) =>
-      library.filter(card => isCardDue(card, now));
+      library.filter(card => isCardDue(card, now)).map(migrateCard);
+
+    const adjustEase = (ease, rating) => {
+      if (rating === 0) return Math.max(MIN_EASE, ease - 0.2);
+      if (rating === 1) return Math.max(MIN_EASE, ease - 0.15);
+      if (rating === 3) return ease + 0.15;
+      return ease;
+    };
+
+    const applyAnkiRating = (card, rating) => {
+      let { state, learningStep, lapses, interval, ease, repetitions, previousInterval } = migrateCard(card);
+      ease = adjustEase(ease, rating);
+      if (state === 'new') state = 'learning';
+
+      if (state === 'learning' || state === 'relearning') {
+        const steps = state === 'learning' ? LEARNING_STEPS : RELEARNING_STEPS;
+        if (rating === 0) {
+          return { ...card, state, learningStep: 0, lapses, interval: 0, ease, repetitions: 0, nextDueDate: scheduleAfterMinutes(steps[0]) };
+        }
+        if (rating === 1) {
+          const mins = steps[Math.min(learningStep, steps.length - 1)];
+          return { ...card, state, learningStep, lapses, interval: 0, ease, repetitions, nextDueDate: scheduleAfterMinutes(mins) };
+        }
+        if (rating === 3 && state === 'learning') {
+          return { ...card, state: 'review', learningStep: 0, lapses, interval: EASY_INTERVAL_NEW, ease, repetitions: 1, nextDueDate: scheduleAfterDays(EASY_INTERVAL_NEW) };
+        }
+        const delay = steps[Math.min(learningStep, steps.length - 1)];
+        learningStep += 1;
+        if (learningStep >= steps.length) {
+          if (state === 'relearning') {
+            const restored = Math.max(1, Math.round((previousInterval || interval || 1) * 0.5));
+            return { ...card, state: 'review', learningStep: 0, lapses, interval: restored, ease, repetitions: Math.max(1, repetitions), nextDueDate: scheduleAfterDays(restored) };
+          }
+          return { ...card, state: 'review', learningStep: 0, lapses, interval: GRADUATING_INTERVAL, ease, repetitions: 1, nextDueDate: scheduleAfterDays(GRADUATING_INTERVAL) };
+        }
+        return { ...card, state, learningStep, lapses, interval: 0, ease, repetitions, nextDueDate: scheduleAfterMinutes(delay) };
+      }
+
+      if (rating === 0) {
+        lapses += 1;
+        return { ...card, state: 'relearning', learningStep: 0, lapses, previousInterval: interval, interval: 0, ease, repetitions: 0, nextDueDate: scheduleAfterMinutes(RELEARNING_STEPS[0]) };
+      }
+      if (rating === 1) {
+        repetitions += 1;
+        interval = repetitions === 1 ? 1 : Math.max(1, Math.round(interval * 1.2));
+        return { ...card, state: 'review', learningStep: 0, lapses, interval, ease, repetitions, nextDueDate: scheduleAfterDays(interval) };
+      }
+      if (rating === 2) {
+        repetitions += 1;
+        if (repetitions === 1) interval = GRADUATING_INTERVAL;
+        else if (repetitions === 2) interval = 6;
+        else interval = Math.max(1, Math.round(interval * ease));
+        return { ...card, state: 'review', learningStep: 0, lapses, interval, ease, repetitions, nextDueDate: scheduleAfterDays(interval) };
+      }
+      repetitions += 1;
+      if (repetitions === 1) interval = EASY_INTERVAL_NEW;
+      else interval = Math.max(1, Math.round(interval * ease * 1.3));
+      return { ...card, state: 'review', learningStep: 0, lapses, interval, ease, repetitions, nextDueDate: scheduleAfterDays(interval) };
+    };
+
+    const getRatingLabels = (card) => {
+      const c = migrateCard(card);
+      const fmtMin = (m) => `${m}分鐘`;
+      const fmtDay = (d) => `${d}天`;
+      if (c.state === 'new' || c.state === 'learning') {
+        const steps = LEARNING_STEPS;
+        const step = c.state === 'new' ? 0 : c.learningStep;
+        return {
+          again: fmtMin(steps[0]),
+          hard: fmtMin(steps[Math.min(step, steps.length - 1)]),
+          good: step + 1 >= steps.length ? fmtDay(GRADUATING_INTERVAL) : fmtMin(steps[step]),
+          easy: fmtDay(EASY_INTERVAL_NEW),
+        };
+      }
+      if (c.state === 'relearning') {
+        const steps = RELEARNING_STEPS;
+        const step = c.learningStep;
+        return {
+          again: fmtMin(steps[0]),
+          hard: fmtMin(steps[Math.min(step, steps.length - 1)]),
+          good: step + 1 >= steps.length ? '恢復複習' : fmtMin(steps[step]),
+          easy: fmtDay(c.previousInterval || c.interval || GRADUATING_INTERVAL),
+        };
+      }
+      const rep = c.repetitions + 1;
+      let goodDays = rep === 1 ? GRADUATING_INTERVAL : rep === 2 ? 6 : Math.max(1, Math.round(c.interval * c.ease));
+      let hardDays = rep === 1 ? 1 : Math.max(1, Math.round(c.interval * 1.2));
+      let easyDays = rep === 1 ? EASY_INTERVAL_NEW : Math.max(1, Math.round(c.interval * c.ease * 1.3));
+      return {
+        again: fmtMin(RELEARNING_STEPS[0]),
+        hard: fmtDay(hardDays),
+        good: fmtDay(goodDays),
+        easy: fmtDay(easyDays),
+      };
+    };
+
+    const pickNextCard = (activeDue, excludeId = null) => {
+      const candidates = (excludeId ? activeDue.filter(c => c.id !== excludeId) : activeDue).map(migrateCard);
+      if (candidates.length === 0) return null;
+      const minP = Math.min(...candidates.map(c => CARD_PRIORITY[c.state] ?? 9));
+      const pool = candidates.filter(c => (CARD_PRIORITY[c.state] ?? 9) === minP);
+      return pool[Math.floor(Math.random() * pool.length)];
+    };
 
     const getImageMimeType = (file) =>
       (file?.type && file.type.startsWith('image/')) ? file.type : 'image/jpeg';
@@ -117,11 +268,15 @@
           exampleZh: item.exampleZh || '',
           type: item.type === 'phrase' ? 'phrase' : 'word',
           addedAt: item.addedAt || Date.now(),
+          ...createSrsFields(),
           interval: typeof item.interval === 'number' ? item.interval : 0,
           ease: typeof item.ease === 'number' ? item.ease : 2.5,
           repetitions: typeof item.repetitions === 'number' ? item.repetitions : 0,
           nextDueDate: item.nextDueDate || null,
-        }));
+          state: item.state || 'new',
+          learningStep: typeof item.learningStep === 'number' ? item.learningStep : 0,
+          lapses: typeof item.lapses === 'number' ? item.lapses : 0,
+        })).map(migrateCard);
     };
 
     const InteractiveSentence = ({ text, onWordClick }) => {
@@ -253,13 +408,18 @@
 
       const [library, setLibrary] = useState(() => {
         try {
+          let list = null;
           const listT008 = localStorage.getItem('auraVocabList');
-          if (listT008) return JSON.parse(listT008);
-          const listT009 = localStorage.getItem('auravocab_lib');
-          if (listT009) return JSON.parse(listT009);
-          const listOld = localStorage.getItem('auravocab_library');
-          if (listOld) return JSON.parse(listOld);
-          return [];
+          if (listT008) list = JSON.parse(listT008);
+          else {
+            const listT009 = localStorage.getItem('auravocab_lib');
+            if (listT009) list = JSON.parse(listT009);
+            else {
+              const listOld = localStorage.getItem('auravocab_library');
+              if (listOld) list = JSON.parse(listOld);
+            }
+          }
+          return Array.isArray(list) ? list.map(migrateCard) : [];
         } catch { return []; }
       });
 
@@ -414,7 +574,7 @@
       const handleSave = () => {
         if (!result) return;
         if (library.some(card => card.word.toLowerCase() === result.word.toLowerCase())) return showToast('已經在庫中囉！', 'error');
-        setLibrary(prev => [{ id: Date.now().toString(), ...result, addedAt: Date.now(), interval: 0, ease: 2.5, repetitions: 0, nextDueDate: null }, ...prev]);
+        setLibrary(prev => [{ id: Date.now().toString(), ...result, addedAt: Date.now(), ...createSrsFields() }, ...prev]);
         showToast('已成功存入單字庫！', 'success');
       };
 
@@ -509,7 +669,7 @@
 
       const handleSaveScanned = (item, index) => {
         if (library.some(card => card.word.toLowerCase() === item.word.toLowerCase())) return showToast('已在庫中囉！', 'error');
-        setLibrary(prev => [{ ...item, id: Date.now().toString() + index, addedAt: Date.now(), interval: 0, ease: 2.5, repetitions: 0, nextDueDate: null }, ...prev]);
+        setLibrary(prev => [{ ...item, id: Date.now().toString() + index, addedAt: Date.now(), ...createSrsFields() }, ...prev]);
         setScannedResults(prev => prev.filter((_, i) => i !== index));
         showToast('已成功存入單字庫！', 'success');
       };
@@ -602,6 +762,7 @@
                       {card.pronunciation && <p className="text-xs font-mono text-slate-400 mt-0.5">{card.pronunciation}</p>}
                     </div>
                     <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-full">{STATE_LABELS[migrateCard(card).state] || '新卡'}</span>
                       <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">{card.type === 'phrase' ? '片語' : '單字'}</span>
                       <button onClick={() => handleDelete(card.id)} className="text-red-400 hover:text-red-500 p-1.5 bg-red-50 rounded-lg transition active:scale-90"><Icon name="trash" className="w-4 h-4" /></button>
                     </div>
@@ -630,7 +791,7 @@
       );
     }
 
-    // --- 4. 🧠 測驗與 Anki (QuizTab) 午夜更新邏輯 ---
+    // --- 4. 🧠 測驗與 Anki SRS (QuizTab) ---
     function QuizTab({ library, setLibrary, showToast, active }) {
       const [dueCards, setDueCards] = useState([]);
       const [currentCard, setCurrentCard] = useState(null);
@@ -638,12 +799,6 @@
       const [userInput, setUserInput] = useState('');
       const [isCorrect, setIsCorrect] = useState(null);
       const [showHint, setShowHint] = useState(false);
-
-      const pickNextCard = (activeDue, excludeId = null) => {
-        const candidates = excludeId ? activeDue.filter(c => c.id !== excludeId) : activeDue;
-        if (candidates.length === 0) return null;
-        return candidates[Math.floor(Math.random() * candidates.length)];
-      };
 
       const resetQuizInput = () => {
         setShowAnswer(false);
@@ -672,30 +827,9 @@
 
       const handleAnkiRate = (rating) => {
         const ratedId = currentCard.id;
-        const updated = library.map(card => {
-          if (card.id !== ratedId) return card;
-          let { interval, ease, repetitions } = card;
-          if (rating === 0) {
-            repetitions = 0; interval = 0; ease = Math.max(1.3, ease - 0.2);
-          } else {
-            repetitions += 1;
-            if (rating === 1) { interval = repetitions === 1 ? 1 : Math.round(interval * 1.2); ease = Math.max(1.3, ease - 0.15); }
-            else if (rating === 2) { interval = repetitions === 1 ? 3 : Math.round(interval * ease); }
-            else if (rating === 3) { interval = repetitions === 1 ? 7 : Math.round(interval * ease * 1.35); ease += 0.15; }
-          }
-
-          let newNextDate;
-          if (interval === 0) {
-            newNextDate = new Date(Date.now() + 10 * 60 * 1000);
-          } else {
-            newNextDate = new Date();
-            newNextDate.setHours(0, 0, 0, 0);
-            newNextDate.setDate(newNextDate.getDate() + interval);
-          }
-
-          return { ...card, interval, ease, repetitions, nextDueDate: newNextDate.toISOString() };
-        });
-
+        const updated = library.map(card =>
+          card.id === ratedId ? applyAnkiRating(card, rating) : card
+        );
         setLibrary(updated);
         const activeDue = getDueCards(updated);
         setDueCards(activeDue);
@@ -703,6 +837,8 @@
         resetQuizInput();
         showToast('排程更新！', 'success');
       };
+
+      const ratingLabels = currentCard ? getRatingLabels(currentCard) : null;
 
       const generateHintPattern = (word) => {
         return word.split('').map(char => {
@@ -718,8 +854,8 @@
         return (
           <div className="bg-white rounded-2xl p-8 border border-slate-100 shadow-sm text-center space-y-4 animate-fade-in mt-10">
             <div className="text-6xl mb-4">🎉</div>
-            <h2 className="text-2xl font-bold text-forest-800">今日複習完成！</h2>
-            <p className="text-slate-500 font-medium">您的大腦已充飽了今日所需的能量。請維持這個節奏，明天繼續收割成果！</p>
+            <h2 className="text-2xl font-bold text-forest-800">目前無到期卡片！</h2>
+            <p className="text-slate-500 font-medium">學習中的單字將在 1～10 分鐘後重新出現；已畢業的單字則依排程在到期日出現。可加新單字或稍後再回來！</p>
           </div>
         );
       }
@@ -728,8 +864,11 @@
         <div className="space-y-6 animate-fade-in">
           <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 space-y-6 mt-4">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <span className="text-xs font-bold text-slate-400">🧠 今日剩餘卡片: {dueCards.length} 張</span>
-              <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-bold">{currentCard.type === 'phrase' ? '片語' : '單字'}</span>
+              <span className="text-xs font-bold text-slate-400">🧠 到期卡片: {dueCards.length} 張</span>
+              <div className="flex gap-1.5">
+                <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">{STATE_LABELS[migrateCard(currentCard).state] || '新卡'}</span>
+                <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-bold">{currentCard.type === 'phrase' ? '片語' : '單字'}</span>
+              </div>
             </div>
 
             <div className="text-center py-4 space-y-3">
@@ -776,23 +915,23 @@
                   
                   {isCorrect !== null && (
                     <p className={`text-sm font-bold ${isCorrect ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {isCorrect ? '✨ 完全正確，太棒了！' : `❌ 哎呀，再接再厲！ (您輸入了: ${userInput})`}
+                      {isCorrect ? '✨ 完全正確，太棒了！' : `❌ 建議按「再次」重新學習 (您輸入了: ${userInput})`}
                     </p>
                   )}
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
-                  <button onClick={() => handleAnkiRate(0)} className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">再次</span><span className="text-[10px] font-medium text-red-500">10分鐘</span>
+                  <button onClick={() => handleAnkiRate(0)} className={`bg-red-50 hover:bg-red-100 border py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition ${!isCorrect ? 'border-red-400 ring-2 ring-red-200' : 'border-red-200'} text-red-800`}>
+                    <span className="text-sm font-bold">再次</span><span className="text-[10px] font-medium text-red-500">{ratingLabels?.again}</span>
                   </button>
                   <button onClick={() => handleAnkiRate(1)} className="bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">困難</span><span className="text-[10px] font-medium text-orange-500">短間隔</span>
+                    <span className="text-sm font-bold">困難</span><span className="text-[10px] font-medium text-orange-500">{ratingLabels?.hard}</span>
                   </button>
-                  <button onClick={() => handleAnkiRate(2)} className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">良好</span><span className="text-[10px] font-medium text-emerald-500">中間隔</span>
+                  <button onClick={() => handleAnkiRate(2)} className={`bg-emerald-50 hover:bg-emerald-100 border py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition ${isCorrect ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-emerald-200'} text-emerald-800`}>
+                    <span className="text-sm font-bold">良好</span><span className="text-[10px] font-medium text-emerald-500">{ratingLabels?.good}</span>
                   </button>
                   <button onClick={() => handleAnkiRate(3)} className="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">簡單</span><span className="text-[10px] font-medium text-blue-500">長間隔</span>
+                    <span className="text-sm font-bold">簡單</span><span className="text-[10px] font-medium text-blue-500">{ratingLabels?.easy}</span>
                   </button>
                 </div>
               </div>
