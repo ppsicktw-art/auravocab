@@ -47,6 +47,14 @@
 
     const APP_VERSION = 'T016';
 
+    const SPELLING_INPUT_PROPS = {
+      autoComplete: 'off',
+      autoCorrect: 'off',
+      autoCapitalize: 'off',
+      spellCheck: false,
+      inputMode: 'text',
+    };
+
     // --- 圖示庫 ---
     const Icon = ({ name, size = 24, className = "" }) => {
       const icons = {
@@ -358,7 +366,8 @@
                   <input 
                     type="text" autoFocus value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSubmit()} 
                     className="w-full text-center text-3xl p-4 bg-white rounded-2xl shadow-sm outline-none border-2 border-transparent focus:border-indigo-400 transition-colors" 
-                    placeholder="輸入拼寫..." 
+                    placeholder="輸入拼寫..."
+                    {...SPELLING_INPUT_PROPS}
                   />
                   <button onClick={() => playAudio(wordObj.word)} className="p-3 bg-forest-50 text-forest-700 rounded-2xl hover:bg-forest-100 transition active:scale-95 border border-forest-100 shrink-0 flex items-center justify-center">
                     <Icon name="speaker" className="w-6 h-6" />
@@ -1105,7 +1114,7 @@
                 </div>
 
                 <div className="flex gap-2">
-                  <input type="text" value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="試著在這裡拼寫英文..." className="w-full text-center text-lg font-semibold px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-forest-600 shadow-inner" onKeyDown={(e) => e.key === 'Enter' && handleCheckAnswer()} />
+                  <input type="text" value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="試著在這裡拼寫英文..." className="w-full text-center text-lg font-semibold px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-forest-600 shadow-inner" onKeyDown={(e) => e.key === 'Enter' && handleCheckAnswer()} {...SPELLING_INPUT_PROPS} />
                   <button onClick={() => playAudio(currentCard.word)} className="p-3 bg-forest-50 text-forest-700 rounded-2xl hover:bg-forest-100 transition active:scale-95 border border-forest-100 shrink-0 flex items-center justify-center">
                     <Icon name="speaker" className="w-6 h-6" />
                   </button>
