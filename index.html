@@ -45,7 +45,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    const APP_VERSION = 'T013';
+    const APP_VERSION = 'T014';
 
     // --- 圖示庫 ---
     const Icon = ({ name, size = 24, className = "" }) => {
@@ -79,6 +79,9 @@
     const TEXT_MODEL = "gemini-2.5-flash";
 
     const getTranslation = (card) => card?.translation || card?.zh || card?.zhDef || '';
+
+    const isWordInLibrary = (word, library) =>
+      library.some(card => card.word.toLowerCase() === word.trim().toLowerCase());
 
     // --- Anki 式 SRS 排程 (T013) ---
     const LEARNING_STEPS = [1, 10];
@@ -625,6 +628,7 @@
       const [images, setImages] = useState([]);
       const [ocrMode, setOcrMode] = useState('phrase');
       const [scannedResults, setScannedResults] = useState([]);
+      const [skippedCount, setSkippedCount] = useState(0);
 
       const handleImageChange = (e) => {
         const files = Array.from(e.target.files);
@@ -635,43 +639,101 @@
             reader.readAsDataURL(file);
         }));
         Promise.all(readPromises).then(results => setImages(prev => [...prev, ...results]));
+        e.target.value = '';
       };
 
       const handleRemoveImage = (index) => setImages(prev => prev.filter((_, i) => i !== index));
+
+      const dedupeWords = (words) => {
+        const seen = new Set();
+        return words.filter(w => {
+          const key = w.trim().toLowerCase();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      };
+
+      const buildCardFromItem = (item, index) => ({
+        ...item,
+        id: `${Date.now()}_${index}`,
+        type: item.type === 'phrase' ? 'phrase' : 'word',
+        addedAt: Date.now(),
+        ...createSrsFields(),
+      });
 
       const handleScan = async () => {
         if (!images.length) return;
         if (!apiKey) return showToast('請先至設定分頁輸入您的 API 金鑰！', 'error');
 
         setLoading(true);
+        setSkippedCount(0);
         try {
-          const results = [];
+          const extractedWords = [];
+          const ocrLabel = ocrMode === 'phrase' ? '片語' : '單字';
+
           for (const img of images) {
-            const prompt = `您是一位英語學習專家與文字掃描秘書。請仔細閱讀圖片中的英文字詞，此圖片屬於 "${ocrMode === 'phrase' ? '片語' : '單字'}" 類別。
-1. 若圖中已有翻譯與例句，請直接抄寫。
-2. 若無，請自行補充。
-回傳單一 JSON 物件：{ "items": [ { "word": "...", "pronunciation": "...", "translation": "...", "exampleEn": "...", "exampleZh": "...", "type": "${ocrMode}" } ] }`;
+            const ocrPrompt = `您是 OCR 文字掃描助手。請仔細閱讀圖片，擷取所有英文${ocrLabel}（不含中文翻譯）。
+僅回傳 JSON：{ "words": ["word1", "word2"] }
+規則：保留圖中原文拼寫；去重；忽略頁碼與純數字。`;
 
             const responseData = await fetchWithRetry(
               `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
-              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [ { text: prompt }, { inlineData: { mimeType: img.mimeType, data: img.base64 } } ] }], generationConfig: { responseMimeType: "application/json" } }) }
+              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [ { text: ocrPrompt }, { inlineData: { mimeType: img.mimeType, data: img.base64 } } ] }], generationConfig: { responseMimeType: "application/json" } }) }
             );
             const parsed = cleanJsonString(responseData.candidates[0].content.parts[0].text);
-            if (parsed && parsed.items) results.push(...parsed.items);
+            if (parsed?.words && Array.isArray(parsed.words)) {
+              extractedWords.push(...parsed.words.filter(w => typeof w === 'string' && w.trim()));
+            }
           }
-          setScannedResults(results);
+
+          const uniqueWords = dedupeWords(extractedWords);
+          const newWords = uniqueWords.filter(w => !isWordInLibrary(w, library));
+          const skipped = uniqueWords.length - newWords.length;
+          setSkippedCount(skipped);
+
+          if (newWords.length === 0) {
+            setScannedResults([]);
+            setImages([]);
+            showToast(skipped > 0 ? `掃描完成！${skipped} 個字詞已在字庫，無需翻譯` : '掃描完成，但未發現有效字詞', skipped > 0 ? 'info' : 'error');
+            return;
+          }
+
+          const translatePrompt = `您是專業英語翻譯官。請為以下英文${ocrLabel}補充學習資訊，字詞清單：${JSON.stringify(newWords)}
+請僅回傳 JSON：{ "items": [ { "word": "...", "pronunciation": "KK音標", "translation": "繁體中文翻譯", "exampleEn": "英文例句", "exampleZh": "例句中文", "type": "${ocrMode}" } ] }
+每個字詞皆需一筆，word 必須與清單原文完全一致。`;
+
+          const translateData = await fetchWithRetry(
+            `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: translatePrompt }] }], generationConfig: { responseMimeType: "application/json" } }) }
+          );
+          const translated = cleanJsonString(translateData.candidates[0].content.parts[0].text);
+          const items = (translated?.items || []).filter(item => item?.word && !isWordInLibrary(item.word, library));
+
+          setScannedResults(items);
           setImages([]);
-          showToast(`萃取完成！共發現 ${results.length} 個字詞`, 'success');
+          const msg = skipped > 0
+            ? `新發現 ${items.length} 個字詞，已跳過 ${skipped} 個字庫重複（未翻譯）`
+            : `萃取完成！共發現 ${items.length} 個字詞`;
+          showToast(msg, 'success');
         } catch (err) {
           showToast(`掃描中斷: ${err.message}`, 'error');
         } finally { setLoading(false); }
       };
 
       const handleSaveScanned = (item, index) => {
-        if (library.some(card => card.word.toLowerCase() === item.word.toLowerCase())) return showToast('已在庫中囉！', 'error');
-        setLibrary(prev => [{ ...item, id: Date.now().toString() + index, addedAt: Date.now(), ...createSrsFields() }, ...prev]);
+        if (isWordInLibrary(item.word, library)) return showToast('已在庫中囉！', 'error');
+        setLibrary(prev => [buildCardFromItem(item, index), ...prev]);
         setScannedResults(prev => prev.filter((_, i) => i !== index));
         showToast('已成功存入單字庫！', 'success');
+      };
+
+      const handleSaveAll = () => {
+        const toSave = scannedResults.filter(item => !isWordInLibrary(item.word, library));
+        if (toSave.length === 0) return showToast('沒有可儲存的新字詞', 'error');
+        setLibrary(prev => [...toSave.map((item, i) => buildCardFromItem(item, i)), ...prev]);
+        setScannedResults([]);
+        showToast(`已成功存入 ${toSave.length} 個字詞！`, 'success');
       };
 
       return (
@@ -702,7 +764,15 @@
           )}
           {scannedResults.length > 0 && (
             <div className="space-y-4">
-              <h3 className="text-sm font-bold text-slate-400 tracking-wider">💡 待審核內容 ({scannedResults.length})</h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-slate-400 tracking-wider">💡 待審核內容 ({scannedResults.length})</h3>
+                <button onClick={handleSaveAll} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow transition active:scale-95 shrink-0">
+                  <Icon name="doubleCheck" className="w-4 h-4" /><span>一鍵全部儲存</span>
+                </button>
+              </div>
+              {skippedCount > 0 && (
+                <p className="text-xs font-medium text-slate-400 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">已自動跳過 {skippedCount} 個字庫中已有的字詞（未呼叫翻譯）</p>
+              )}
               {scannedResults.map((item, idx) => (
                 <div key={idx} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-3">
                   <div className="flex justify-between items-start">
