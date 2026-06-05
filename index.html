@@ -108,14 +108,14 @@
     // --- App 元件 ---
     function App() {
       const [activeTab, setActiveTab] = useState('search');
-      const [apiKey, setApiKey] = useState(() => localStorage.getItem('auravocab_apikey') || '');
+      const [apiKey, setApiKey] = useState(() => localStorage.getItem('auravocab_key') || '');
       const [library, setLibrary] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('auravocab_library')) || []; } catch { return []; }
+        try { return JSON.parse(localStorage.getItem('auravocab_lib')) || []; } catch { return []; }
       });
       const [searchText, setSearchText] = useState('');
       const [toast, setToast] = useState(null);
 
-      useEffect(() => { localStorage.setItem('auravocab_library', JSON.stringify(library)); }, [library]);
+      useEffect(() => { localStorage.setItem('auravocab_lib', JSON.stringify(library)); }, [library]);
 
       const showToast = (message, type = 'info') => {
         setToast({ message, type });
@@ -125,7 +125,7 @@
       const handleSaveApiKey = (key) => {
         const cleanedKey = key.trim().replace(/<\/?[^>]+(>|$)/g, ""); 
         setApiKey(cleanedKey);
-        localStorage.setItem('auravocab_apikey', cleanedKey);
+        localStorage.setItem('auravocab_key', cleanedKey);
         showToast('金鑰已更新', 'success');
       };
 
