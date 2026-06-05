@@ -108,14 +108,42 @@
     // --- App 元件 ---
     function App() {
       const [activeTab, setActiveTab] = useState('search');
-      const [apiKey, setApiKey] = useState(() => localStorage.getItem('auravocab_key') || '');
-      const [library, setLibrary] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('auravocab_lib')) || []; } catch { return []; }
+      
+      // 自動尋回所有歷史版本的 API Key
+      const [apiKey, setApiKey] = useState(() => {
+        try {
+          const settings = JSON.parse(localStorage.getItem('auraSettings'));
+          if (settings && settings.apiKey) return settings.apiKey;
+        } catch (e) {}
+        return localStorage.getItem('auravocab_key') || localStorage.getItem('auravocab_apikey') || '';
       });
+
+      // 自動尋回所有歷史版本的單字庫 (支援 T008 的 auraVocabList)
+      const [library, setLibrary] = useState(() => {
+        try {
+          const listT008 = localStorage.getItem('auraVocabList');
+          if (listT008) return JSON.parse(listT008);
+          
+          const listT009 = localStorage.getItem('auravocab_lib');
+          if (listT009) return JSON.parse(listT009);
+          
+          const listOld = localStorage.getItem('auravocab_library');
+          if (listOld) return JSON.parse(listOld);
+          
+          return [];
+        } catch {
+          return [];
+        }
+      });
+      
       const [searchText, setSearchText] = useState('');
       const [toast, setToast] = useState(null);
 
-      useEffect(() => { localStorage.setItem('auravocab_lib', JSON.stringify(library)); }, [library]);
+      // 雙重備份：將資料同時存入新舊抽屜，確保未來更新絕不遺失
+      useEffect(() => { 
+        localStorage.setItem('auravocab_lib', JSON.stringify(library)); 
+        localStorage.setItem('auraVocabList', JSON.stringify(library)); 
+      }, [library]);
 
       const showToast = (message, type = 'info') => {
         setToast({ message, type });
@@ -125,7 +153,9 @@
       const handleSaveApiKey = (key) => {
         const cleanedKey = key.trim().replace(/<\/?[^>]+(>|$)/g, ""); 
         setApiKey(cleanedKey);
+        // 雙重備份 API Key
         localStorage.setItem('auravocab_key', cleanedKey);
+        localStorage.setItem('auraSettings', JSON.stringify({ apiKey: cleanedKey }));
         showToast('金鑰已更新', 'success');
       };
 
