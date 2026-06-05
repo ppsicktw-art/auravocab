@@ -824,6 +824,14 @@
         showToast(`已成功存入 ${toSave.length} 個字詞！`, 'success');
       };
 
+      const handleToggleScannedType = (index) => {
+        setScannedResults(prev => prev.map((item, i) => {
+          if (i !== index) return item;
+          const newType = item.type === 'phrase' ? 'word' : 'phrase';
+          return { ...item, type: newType };
+        }));
+      };
+
       return (
         <div className="space-y-6 animate-fade-in">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
@@ -879,7 +887,13 @@
                       <div className="flex items-center gap-1 flex-wrap">
                         <h4 className="text-lg font-bold text-slate-800">{item.word}</h4>
                         <button onClick={() => playAudio(item.word)} className="p-1 hover:bg-slate-100 rounded-full transition"><Icon name="speaker" className="w-4 h-4 text-forest-700" /></button>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">{item.type === 'phrase' ? '片語' : '單字'}</span>
+                        <button
+                          onClick={() => handleToggleScannedType(idx)}
+                          title="點擊切換單字／片語"
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition active:scale-95 ${item.type === 'phrase' ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                        >
+                          {item.type === 'phrase' ? '片語' : '單字'}
+                        </button>
                       </div>
                       {item.pronunciation && <span className="text-xs font-mono text-slate-400">{item.pronunciation}</span>}
                     </div>
@@ -909,6 +923,17 @@
       const handleDelete = (id) => {
         setLibrary(prev => prev.filter(card => card.id !== id));
         showToast('字詞已成功刪除！', 'success');
+      };
+
+      const handleToggleType = (id) => {
+        setLibrary(prev => prev.map(card => {
+          if (card.id !== id) return card;
+          const newType = card.type === 'phrase' ? 'word' : 'phrase';
+          return { ...card, type: newType };
+        }));
+        const card = library.find(c => c.id === id);
+        const newType = card?.type === 'phrase' ? 'word' : 'phrase';
+        showToast(`已改為${newType === 'phrase' ? '片語' : '單字'}`, 'success');
       };
 
       const filteredList = useMemo(() => {
@@ -943,7 +968,13 @@
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-full">{STATE_LABELS[migrateCard(card).state] || '新卡'}</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">{card.type === 'phrase' ? '片語' : '單字'}</span>
+                      <button
+                        onClick={() => handleToggleType(card.id)}
+                        title="點擊切換單字／片語"
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition active:scale-95 ${card.type === 'phrase' ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                      >
+                        {card.type === 'phrase' ? '片語' : '單字'}
+                      </button>
                       <button onClick={() => handleDelete(card.id)} className="text-red-400 hover:text-red-500 p-1.5 bg-red-50 rounded-lg transition active:scale-90"><Icon name="trash" className="w-4 h-4" /></button>
                     </div>
                   </div>
