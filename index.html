@@ -47,7 +47,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const APP_VERSION = 'T023';
+    const APP_VERSION = 'T024';
 
     const SPELLING_INPUT_PROPS = {
       autoComplete: 'off',
@@ -126,6 +126,29 @@
       return cells;
     };
 
+    const normalizeWordKey = (word) =>
+      (word || '').trim().toLowerCase().replace(/[^a-z]/g, '');
+
+    const syllablesMatchWord = (word, syllableParts) => {
+      const w = normalizeWordKey(word);
+      const s = normalizeWordKey((syllableParts || []).join(''));
+      return w.length > 0 && w === s;
+    };
+
+    const wrapBreakdown = (word, data) => ({
+      forWord: normalizeWordKey(word),
+      syllableParts: data.syllableParts,
+      kkParts: data.kkParts,
+    });
+
+    const getValidCachedBreakdown = (card) => {
+      if (!card.syllableParts?.length || !card.kkParts?.length) return null;
+      const key = normalizeWordKey(card.word);
+      if (card.breakdownWord && card.breakdownWord !== key) return null;
+      if (!syllablesMatchWord(card.word, card.syllableParts)) return null;
+      return wrapBreakdown(card.word, card);
+    };
+
     const extractKkString = (pronunciation) => {
       if (!pronunciation) return '';
       const match = pronunciation.match(/KK\[([^\]]+)\]/i);
@@ -135,10 +158,10 @@
     const guessWordBreakdown = (card) => {
       const word = (card.word || '').trim();
       const kk = extractKkString(card.pronunciation);
-      return {
+      return wrapBreakdown(word, {
         syllableParts: word ? [word.toLowerCase()] : [],
         kkParts: kk ? [kk] : [],
-      };
+      });
     };
 
     const fetchWordBreakdown = async (apiKey, card) => {
@@ -157,7 +180,10 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       if (!syllableParts.length || syllableParts.length !== kkParts.length) {
         throw new Error('音節拆解格式不正確');
       }
-      return { syllableParts, kkParts };
+      if (!syllablesMatchWord(card.word, syllableParts)) {
+        throw new Error('音節拆解與單字不符');
+      }
+      return wrapBreakdown(card.word, { syllableParts, kkParts });
     };
 
     const isWordInLibrary = (word, library) =>
@@ -1248,23 +1274,46 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         }
       };
 
+      const persistBreakdown = (cardId, word, data) => {
+        const key = normalizeWordKey(word);
+        setLibrary(prev => prev.map(c =>
+          c.id === cardId
+            ? { ...c, syllableParts: data.syllableParts, kkParts: data.kkParts, breakdownWord: key }
+            : c
+        ));
+      };
+
+      const clearCardBreakdown = (cardId) => {
+        setLibrary(prev => prev.map(c => {
+          if (c.id !== cardId) return c;
+          const { syllableParts, kkParts, breakdownWord, ...rest } = c;
+          return rest;
+        }));
+      };
+
       const loadWordBreakdown = async (card) => {
         const reqId = ++breakdownReqRef.current;
         const cardId = card.id;
+        const wordKey = normalizeWordKey(card.word);
         setWordBreakdown(null);
         setBreakdownCardId(cardId);
         setBreakdownLoading(true);
 
         const applyBreakdown = (data) => {
           if (reqId !== breakdownReqRef.current) return;
+          if (data.forWord !== wordKey) return;
           setWordBreakdown(data);
           setBreakdownCardId(cardId);
           setBreakdownLoading(false);
         };
 
-        if (card.syllableParts?.length && card.kkParts?.length) {
-          applyBreakdown({ syllableParts: card.syllableParts, kkParts: card.kkParts });
+        const cached = getValidCachedBreakdown(card);
+        if (cached) {
+          applyBreakdown(cached);
           return;
+        }
+        if (card.syllableParts?.length || card.kkParts?.length) {
+          clearCardBreakdown(cardId);
         }
         if (!apiKey) {
           applyBreakdown(guessWordBreakdown(card));
@@ -1273,12 +1322,11 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         try {
           const data = await fetchWordBreakdown(apiKey, card);
           if (reqId !== breakdownReqRef.current) return;
+          if (data.forWord !== wordKey) return;
           setWordBreakdown(data);
           setBreakdownCardId(cardId);
           setBreakdownLoading(false);
-          setLibrary(prev => prev.map(c =>
-            c.id === cardId ? { ...c, syllableParts: data.syllableParts, kkParts: data.kkParts } : c
-          ));
+          persistBreakdown(cardId, card.word, data);
         } catch {
           applyBreakdown(guessWordBreakdown(card));
         }
@@ -1317,7 +1365,10 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         setIsCorrect(correct);
         setShowAnswer(true);
         playAudio(currentCard.word);
-        if (!correct && currentCard.type !== 'phrase') loadWordBreakdown(currentCard);
+        if (!correct && currentCard.type !== 'phrase') {
+          const freshCard = library.find(c => c.id === currentCard.id) || currentCard;
+          loadWordBreakdown(freshCard);
+        }
       };
 
       const handleAnkiRate = (rating) => {
@@ -1351,10 +1402,11 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       const spellingDiff = (!isCorrect && userInput)
         ? buildSpellingDiff(currentCard.word, userInput.trim())
         : [];
+      const currentWordKey = normalizeWordKey(currentCard.word);
       const showBreakdown = !isCorrect
         && currentCard.type !== 'phrase'
         && breakdownCardId === currentCard.id
-        && (breakdownLoading || wordBreakdown);
+        && (breakdownLoading || wordBreakdown?.forWord === currentWordKey);
 
       return (
         <div className="space-y-6 animate-fade-in">
@@ -1492,7 +1544,7 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                         <div className="w-4 h-4 border-2 border-slate-500 border-t-white rounded-full animate-spin" />
                         <span>載入音節拆解中…</span>
                       </div>
-                    ) : wordBreakdown && breakdownCardId === currentCard.id ? (
+                    ) : wordBreakdown?.forWord === currentWordKey && breakdownCardId === currentCard.id ? (
                       <table className="w-full min-w-[320px] text-sm">
                         <thead>
                           <tr className="text-slate-400 text-xs border-b border-slate-700">
