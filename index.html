@@ -47,7 +47,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const APP_VERSION = 'T022';
+    const APP_VERSION = 'T023';
 
     const SPELLING_INPUT_PROPS = {
       autoComplete: 'off',
@@ -1333,18 +1333,6 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         showToast('排程更新！', 'success');
       };
 
-      const ratingLabels = currentCard ? getRatingLabels(currentCard) : null;
-      const step1Done = recordState === 'recorded';
-      const step2Done = hasListened;
-
-      const spellingDiff = (!isCorrect && userInput)
-        ? buildSpellingDiff(currentCard.word, userInput.trim())
-        : [];
-      const showBreakdown = !isCorrect
-        && currentCard.type !== 'phrase'
-        && breakdownCardId === currentCard.id
-        && (breakdownLoading || wordBreakdown);
-
       if (library.length === 0) return <div className="text-center py-20 text-slate-500 font-bold">字庫還沒有單字，請先去查詢或萃取喔！</div>;
       
       if (!currentCard) {
@@ -1356,6 +1344,17 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
           </div>
         );
       }
+
+      const ratingLabels = getRatingLabels(currentCard);
+      const step1Done = recordState === 'recorded';
+      const step2Done = hasListened;
+      const spellingDiff = (!isCorrect && userInput)
+        ? buildSpellingDiff(currentCard.word, userInput.trim())
+        : [];
+      const showBreakdown = !isCorrect
+        && currentCard.type !== 'phrase'
+        && breakdownCardId === currentCard.id
+        && (breakdownLoading || wordBreakdown);
 
       return (
         <div className="space-y-6 animate-fade-in">
