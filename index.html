@@ -47,7 +47,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const APP_VERSION = 'T021';
+    const APP_VERSION = 'T022';
 
     const SPELLING_INPUT_PROPS = {
       autoComplete: 'off',
@@ -93,6 +93,38 @@
 
     const formatSyllableParts = (parts) =>
       (parts || []).filter(Boolean).join(' • ');
+
+    const generateLiveHintPattern = (word, input) => {
+      let inputIdx = 0;
+      return word.split('').map(char => {
+        if (char === ' ') return '  ';
+        if (/[a-zA-Z]/.test(char)) {
+          const display = inputIdx < input.length ? input[inputIdx] : '_';
+          inputIdx++;
+          return display + ' ';
+        }
+        return char + ' ';
+      }).join('');
+    };
+
+    const buildSpellingDiff = (actual, typed) => {
+      const maxLen = Math.max(actual.length, typed.length);
+      const cells = [];
+      for (let i = 0; i < maxLen; i++) {
+        const a = actual[i];
+        const t = typed[i];
+        if (t === undefined) {
+          cells.push({ char: '_', status: 'missing' });
+        } else if (a === undefined) {
+          cells.push({ char: t, status: 'extra' });
+        } else if (a.toLowerCase() === t.toLowerCase()) {
+          cells.push({ char: t, status: 'correct' });
+        } else {
+          cells.push({ char: t, status: 'wrong' });
+        }
+      }
+      return cells;
+    };
 
     const extractKkString = (pronunciation) => {
       if (!pronunciation) return '';
@@ -1143,6 +1175,8 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       const [hasListened, setHasListened] = useState(false);
       const [wordBreakdown, setWordBreakdown] = useState(null);
       const [breakdownLoading, setBreakdownLoading] = useState(false);
+      const [breakdownCardId, setBreakdownCardId] = useState(null);
+      const breakdownReqRef = useRef(0);
       const mediaRecorderRef = useRef(null);
       const mediaStreamRef = useRef(null);
       const audioChunksRef = useRef([]);
@@ -1215,25 +1249,38 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       };
 
       const loadWordBreakdown = async (card) => {
+        const reqId = ++breakdownReqRef.current;
+        const cardId = card.id;
+        setWordBreakdown(null);
+        setBreakdownCardId(cardId);
+        setBreakdownLoading(true);
+
+        const applyBreakdown = (data) => {
+          if (reqId !== breakdownReqRef.current) return;
+          setWordBreakdown(data);
+          setBreakdownCardId(cardId);
+          setBreakdownLoading(false);
+        };
+
         if (card.syllableParts?.length && card.kkParts?.length) {
-          setWordBreakdown({ syllableParts: card.syllableParts, kkParts: card.kkParts });
+          applyBreakdown({ syllableParts: card.syllableParts, kkParts: card.kkParts });
           return;
         }
         if (!apiKey) {
-          setWordBreakdown(guessWordBreakdown(card));
+          applyBreakdown(guessWordBreakdown(card));
           return;
         }
-        setBreakdownLoading(true);
         try {
           const data = await fetchWordBreakdown(apiKey, card);
+          if (reqId !== breakdownReqRef.current) return;
           setWordBreakdown(data);
+          setBreakdownCardId(cardId);
+          setBreakdownLoading(false);
           setLibrary(prev => prev.map(c =>
-            c.id === card.id ? { ...c, syllableParts: data.syllableParts, kkParts: data.kkParts } : c
+            c.id === cardId ? { ...c, syllableParts: data.syllableParts, kkParts: data.kkParts } : c
           ));
         } catch {
-          setWordBreakdown(guessWordBreakdown(card));
-        } finally {
-          setBreakdownLoading(false);
+          applyBreakdown(guessWordBreakdown(card));
         }
       };
 
@@ -1245,7 +1292,9 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         setShowHint(false);
         setRecordState('idle');
         setHasListened(false);
+        breakdownReqRef.current += 1;
         setWordBreakdown(null);
+        setBreakdownCardId(null);
         setBreakdownLoading(false);
       };
 
@@ -1288,13 +1337,13 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       const step1Done = recordState === 'recorded';
       const step2Done = hasListened;
 
-      const generateHintPattern = (word) => {
-        return word.split('').map(char => {
-          if (char === ' ') return '  ';
-          if (/[a-zA-Z]/.test(char)) return '_ ';
-          return char + ' ';
-        }).join('');
-      };
+      const spellingDiff = (!isCorrect && userInput)
+        ? buildSpellingDiff(currentCard.word, userInput.trim())
+        : [];
+      const showBreakdown = !isCorrect
+        && currentCard.type !== 'phrase'
+        && breakdownCardId === currentCard.id
+        && (breakdownLoading || wordBreakdown);
 
       if (library.length === 0) return <div className="text-center py-20 text-slate-500 font-bold">字庫還沒有單字，請先去查詢或萃取喔！</div>;
       
@@ -1379,7 +1428,11 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                 </div>
                 {showHint && (
                   <div className="animate-fade-in bg-slate-50 border border-slate-100 px-4 py-2 rounded-xl text-center">
-                    <span className="text-lg font-mono text-slate-400 tracking-widest whitespace-pre">{generateHintPattern(currentCard.word)}</span>
+                    <span className="text-lg font-mono tracking-widest whitespace-pre">
+                      {generateLiveHintPattern(currentCard.word, userInput).split('').map((ch, i) => (
+                        <span key={i} className={ch !== '_' && ch !== ' ' ? 'text-forest-700 font-bold' : 'text-slate-400'}>{ch}</span>
+                      ))}
+                    </span>
                   </div>
                 )}
                 <input
@@ -1408,19 +1461,39 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                   
                   {isCorrect !== null && (
                     <p className={`text-sm font-bold ${isCorrect ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {isCorrect ? '✨ 完全正確，太棒了！' : `❌ 建議按「再次」重新學習 (您輸入了: ${userInput})`}
+                      {isCorrect ? '✨ 完全正確，太棒了！' : '❌ 建議按「再次」重新學習'}
                     </p>
+                  )}
+                  {!isCorrect && spellingDiff.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <p className="text-xs font-bold text-slate-400">您的拼寫</p>
+                      <div className="text-2xl font-mono font-bold tracking-wider flex flex-wrap justify-center gap-0.5">
+                        {spellingDiff.map((cell, i) => (
+                          <span
+                            key={i}
+                            className={
+                              cell.status === 'correct' ? 'text-emerald-700' :
+                              cell.status === 'missing' ? 'text-red-400 underline decoration-red-400 decoration-2' :
+                              'text-red-500'
+                            }
+                          >
+                            {cell.char}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400">綠色＝正確字母　紅色＝錯誤或缺少</p>
+                    </div>
                   )}
                 </div>
 
-                {!isCorrect && currentCard.type !== 'phrase' && (
+                {showBreakdown && (
                   <div className="bg-slate-900 text-white rounded-2xl p-4 overflow-x-auto">
                     {breakdownLoading ? (
                       <div className="flex items-center justify-center gap-2 py-4 text-slate-400 text-sm font-medium">
                         <div className="w-4 h-4 border-2 border-slate-500 border-t-white rounded-full animate-spin" />
                         <span>載入音節拆解中…</span>
                       </div>
-                    ) : wordBreakdown ? (
+                    ) : wordBreakdown && breakdownCardId === currentCard.id ? (
                       <table className="w-full min-w-[320px] text-sm">
                         <thead>
                           <tr className="text-slate-400 text-xs border-b border-slate-700">
@@ -1431,7 +1504,7 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                           </tr>
                         </thead>
                         <tbody>
-                          <tr>
+                          <tr key={currentCard.id}>
                             <td className="font-bold py-3 pr-3 align-top whitespace-nowrap">{currentCard.word}</td>
                             <td className="py-3 pr-3 align-top font-medium tracking-wide">{formatSyllableParts(wordBreakdown.syllableParts)}</td>
                             <td className="py-3 pr-3 align-top">
