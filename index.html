@@ -47,7 +47,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const APP_VERSION = 'T019';
+    const APP_VERSION = 'T021';
 
     const SPELLING_INPUT_PROPS = {
       autoComplete: 'off',
@@ -91,8 +91,126 @@
 
     const getTranslation = (card) => card?.translation || card?.zh || card?.zhDef || '';
 
+    const formatSyllableParts = (parts) =>
+      (parts || []).filter(Boolean).join(' • ');
+
+    const extractKkString = (pronunciation) => {
+      if (!pronunciation) return '';
+      const match = pronunciation.match(/KK\[([^\]]+)\]/i);
+      return match ? match[1] : pronunciation.replace(/DJ\[[^\]]+\]/gi, '').replace(/KK/gi, '').trim();
+    };
+
+    const guessWordBreakdown = (card) => {
+      const word = (card.word || '').trim();
+      const kk = extractKkString(card.pronunciation);
+      return {
+        syllableParts: word ? [word.toLowerCase()] : [],
+        kkParts: kk ? [kk] : [],
+      };
+    };
+
+    const fetchWordBreakdown = async (apiKey, card) => {
+      const prompt = `您是英語發音教學助理。請為「${card.word}」提供音節拆解與 KK 音標逐音節拆解。
+${card.pronunciation ? `已知音標：${card.pronunciation}` : ''}
+${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
+規則：syllableParts 為英文音節（小寫）；kkParts 為對應 KK 音標片段（不含方括號與 KK/DJ 前綴）；兩者數量必須相同。
+僅回傳 JSON：{ "syllableParts": ["ex","cel","lent"], "kkParts": ["ɛk","səl","ənt"] }`;
+      const responseData = await fetchWithRetry(
+        `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }) }
+      );
+      const parsed = cleanJsonString(responseData.candidates[0].content.parts[0].text);
+      const syllableParts = (parsed?.syllableParts || []).map(s => String(s).trim()).filter(Boolean);
+      const kkParts = (parsed?.kkParts || []).map(s => String(s).trim().replace(/^\[|\]$/g, '')).filter(Boolean);
+      if (!syllableParts.length || syllableParts.length !== kkParts.length) {
+        throw new Error('音節拆解格式不正確');
+      }
+      return { syllableParts, kkParts };
+    };
+
     const isWordInLibrary = (word, library) =>
       library.some(card => card.word.toLowerCase() === word.trim().toLowerCase());
+
+    const OCR_CACHE_KEY = 'auravocab_ocr_cache';
+    const OCR_CACHE_MAX = 300;
+
+    const hashBase64Image = async (base64) => {
+      if (crypto?.subtle) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+      }
+      let h = 5381;
+      for (let i = 0; i < base64.length; i++) h = ((h << 5) + h) ^ base64.charCodeAt(i);
+      return `f${(h >>> 0).toString(16)}`;
+    };
+
+    const loadOcrCache = () => {
+      try {
+        const raw = localStorage.getItem(OCR_CACHE_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch { return {}; }
+    };
+
+    const saveOcrCache = (cache) => {
+      const entries = Object.entries(cache);
+      if (entries.length > OCR_CACHE_MAX) {
+        entries.sort((a, b) => (a[1].savedAt || 0) - (b[1].savedAt || 0));
+        localStorage.setItem(OCR_CACHE_KEY, JSON.stringify(Object.fromEntries(entries.slice(-OCR_CACHE_MAX))));
+      } else {
+        localStorage.setItem(OCR_CACHE_KEY, JSON.stringify(cache));
+      }
+    };
+
+    const clearOcrCache = () => localStorage.removeItem(OCR_CACHE_KEY);
+
+    const getOcrCacheCount = () => Object.keys(loadOcrCache()).length;
+
+    const getOcrPrompt = (mode) => {
+      if (mode === 'phrase') return `您是英語片語卡 OCR 助手。圖片為「深綠色背景、白色文字」的片語學習卡，格式通常為：
+第1行：英文片語
+第2行：繁體中文翻譯
+第3行：英文例句
+第4行：例句中文翻譯
+
+請直接抄寫圖中內容，不要改寫、不要自行新增或替換例句。
+若一張圖有多組片語，每組各輸出一筆。
+僅回傳 JSON：{ "items": [ { "word": "英文片語", "translation": "中文翻譯", "exampleEn": "英文例句", "exampleZh": "例句中文", "pronunciation": "", "type": "phrase" } ] }`;
+      if (mode === 'word') return `您是英語單字卡 OCR 助手。圖片為「白色卡片」的單字學習卡，格式通常為：
+- 英文單字（左側可能有喇叭圖示，請忽略圖示）
+- KK[...] 與 DJ[...] 音標（合併寫入 pronunciation）
+- 詞性標示（如 a.形容詞、n.名詞，可忽略不輸出）
+- 繁體中文釋義
+
+此格式「沒有例句」，請勿自行補充例句。
+若一張圖有多張單字卡，每張各輸出一筆。
+僅回傳 JSON：{ "items": [ { "word": "英文單字", "pronunciation": "KK[...], DJ[...]", "translation": "繁體中文釋義", "type": "word" } ] }`;
+      return `您是 AuraVocab 智慧掃描助手。請分析圖片，自動判斷每筆內容屬於「單字」或「片語」，並擷取對應欄位。
+
+【片語卡特徵】深綠色背景、白色文字，通常含：英文片語 → 中文翻譯 → 英文例句 → 中文例句
+→ type 設為 "phrase"，直接抄寫圖中例句，不要改寫或新增
+
+【單字卡特徵】白色卡片，通常含：英文單字、KK/DJ 音標、詞性、中文釋義，通常「沒有例句」
+→ type 設為 "word"，exampleEn 與 exampleZh 留空字串，不要自行補例句
+
+規則：忽略喇叭圖示；一圖多筆各輸出一筆；無法辨識則略過。
+僅回傳 JSON：{ "items": [ { "word": "...", "pronunciation": "...", "translation": "...", "exampleEn": "...", "exampleZh": "...", "type": "word 或 phrase" } ] }`;
+    };
+
+    const normalizeScannedItems = (parsed, mode) => {
+      if (!parsed?.items) return [];
+      const filtered = parsed.items.filter(i => i?.word?.trim());
+      if (mode === 'phrase') return filtered.map(item => ({ ...item, type: 'phrase' }));
+      if (mode === 'word') return filtered.map(item => ({ ...item, type: 'word', exampleEn: '', exampleZh: '' }));
+      return filtered.map(item => ({
+        ...item,
+        type: item.type === 'phrase' ? 'phrase' : 'word',
+        exampleEn: item.exampleEn || '',
+        exampleZh: item.exampleZh || '',
+      }));
+    };
 
     // --- Anki 式 SRS 排程 (T013) ---
     const LEARNING_STEPS = [1, 10];
@@ -498,7 +616,7 @@
                {practiceWordObj && <SinglePracticeView wordObj={practiceWordObj} playAudio={playAudio} onBack={() => setActiveTab('library')} />}
             </div>
             <div className={activeTab === 'quiz' ? 'block' : 'hidden'}>
-               <QuizTab library={library} setLibrary={setLibrary} showToast={showToast} active={activeTab === 'quiz'} />
+               <QuizTab apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} active={activeTab === 'quiz'} />
             </div>
             <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
                <SettingsTab apiKey={apiKey} onSaveKey={handleSaveApiKey} library={library} setLibrary={setLibrary} showToast={showToast} />
@@ -641,17 +759,42 @@
       const [ocrMode, setOcrMode] = useState('smart');
       const [scannedResults, setScannedResults] = useState([]);
       const [skippedCount, setSkippedCount] = useState(0);
+      const [cacheHitCount, setCacheHitCount] = useState(0);
 
-      const handleImageChange = (e) => {
+      const handleImageChange = async (e) => {
         const files = Array.from(e.target.files);
         if (!files.length) return;
-        const readPromises = files.map(file => new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve({ file, preview: reader.result, base64: reader.result.split(',')[1], mimeType: getImageMimeType(file) });
-            reader.readAsDataURL(file);
-        }));
-        Promise.all(readPromises).then(results => setImages(prev => [...prev, ...results]));
         e.target.value = '';
+        try {
+          const results = await Promise.all(files.map(file => new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve({
+              file,
+              preview: reader.result,
+              base64: reader.result.split(',')[1],
+              mimeType: getImageMimeType(file),
+            });
+            reader.readAsDataURL(file);
+          })));
+          const withHash = await Promise.all(results.map(async r => ({
+            ...r,
+            hash: await hashBase64Image(r.base64),
+          })));
+          setImages(prev => {
+            const seen = new Set(prev.map(i => i.hash));
+            const added = [];
+            let dup = 0;
+            for (const img of withHash) {
+              if (seen.has(img.hash)) { dup++; continue; }
+              seen.add(img.hash);
+              added.push(img);
+            }
+            if (dup > 0) showToast(`已跳過 ${dup} 張重複圖片`, 'info');
+            return [...prev, ...added];
+          });
+        } catch {
+          showToast('讀取圖片失敗', 'error');
+        }
       };
 
       const handleRemoveImage = (index) => setImages(prev => prev.filter((_, i) => i !== index));
@@ -682,69 +825,29 @@
         return cleanJsonString(responseData.candidates[0].content.parts[0].text);
       };
 
-      const scanPhrases = async () => {
+      const scanImagesWithCache = async () => {
+        const prompt = getOcrPrompt(ocrMode);
+        const cache = loadOcrCache();
         const allItems = [];
+        let cacheHits = 0;
+
         for (const img of images) {
-          const prompt = `您是英語片語卡 OCR 助手。圖片為「深綠色背景、白色文字」的片語學習卡，格式通常為：
-第1行：英文片語
-第2行：繁體中文翻譯
-第3行：英文例句
-第4行：例句中文翻譯
-
-請直接抄寫圖中內容，不要改寫、不要自行新增或替換例句。
-若一張圖有多組片語，每組各輸出一筆。
-僅回傳 JSON：{ "items": [ { "word": "英文片語", "translation": "中文翻譯", "exampleEn": "英文例句", "exampleZh": "例句中文", "pronunciation": "", "type": "phrase" } ] }`;
-
-          const parsed = await scanImage(img, prompt);
-          if (parsed?.items) allItems.push(...parsed.items.filter(i => i?.word?.trim()));
-        }
-        return allItems.map(item => ({ ...item, type: 'phrase' }));
-      };
-
-      const scanSmart = async () => {
-        const allItems = [];
-        for (const img of images) {
-          const prompt = `您是 AuraVocab 智慧掃描助手。請分析圖片，自動判斷每筆內容屬於「單字」或「片語」，並擷取對應欄位。
-
-【片語卡特徵】深綠色背景、白色文字，通常含：英文片語 → 中文翻譯 → 英文例句 → 中文例句
-→ type 設為 "phrase"，直接抄寫圖中例句，不要改寫或新增
-
-【單字卡特徵】白色卡片，通常含：英文單字、KK/DJ 音標、詞性、中文釋義，通常「沒有例句」
-→ type 設為 "word"，exampleEn 與 exampleZh 留空字串，不要自行補例句
-
-規則：忽略喇叭圖示；一圖多筆各輸出一筆；無法辨識則略過。
-僅回傳 JSON：{ "items": [ { "word": "...", "pronunciation": "...", "translation": "...", "exampleEn": "...", "exampleZh": "...", "type": "word 或 phrase" } ] }`;
-
-          const parsed = await scanImage(img, prompt);
-          if (parsed?.items) {
-            allItems.push(...parsed.items.filter(i => i?.word?.trim()).map(item => ({
-              ...item,
-              type: item.type === 'phrase' ? 'phrase' : 'word',
-              exampleEn: item.exampleEn || '',
-              exampleZh: item.exampleZh || '',
-            })));
+          if (!img.hash) continue;
+          const cacheKey = `${ocrMode}:${img.hash}`;
+          const cached = cache[cacheKey];
+          if (cached?.items) {
+            cacheHits++;
+            allItems.push(...cached.items);
+            continue;
           }
-        }
-        return allItems;
-      };
-
-      const scanWords = async () => {
-        const allItems = [];
-        for (const img of images) {
-          const prompt = `您是英語單字卡 OCR 助手。圖片為「白色卡片」的單字學習卡，格式通常為：
-- 英文單字（左側可能有喇叭圖示，請忽略圖示）
-- KK[...] 與 DJ[...] 音標（合併寫入 pronunciation）
-- 詞性標示（如 a.形容詞、n.名詞，可忽略不輸出）
-- 繁體中文釋義
-
-此格式「沒有例句」，請勿自行補充例句。
-若一張圖有多張單字卡，每張各輸出一筆。
-僅回傳 JSON：{ "items": [ { "word": "英文單字", "pronunciation": "KK[...], DJ[...]", "translation": "繁體中文釋義", "type": "word" } ] }`;
-
           const parsed = await scanImage(img, prompt);
-          if (parsed?.items) allItems.push(...parsed.items.filter(i => i?.word?.trim()));
+          const items = normalizeScannedItems(parsed, ocrMode);
+          cache[cacheKey] = { items, savedAt: Date.now() };
+          allItems.push(...items);
         }
-        return allItems.map(item => ({ ...item, type: 'word', exampleEn: '', exampleZh: '' }));
+
+        saveOcrCache(cache);
+        return { allItems, cacheHits };
       };
 
       const generateWordExamples = async (words) => {
@@ -771,21 +874,35 @@
 
         setLoading(true);
         setSkippedCount(0);
+        setCacheHitCount(0);
         try {
-          let extracted;
-          if (ocrMode === 'smart') extracted = await scanSmart();
-          else if (ocrMode === 'phrase') extracted = await scanPhrases();
-          else extracted = await scanWords();
+          const { allItems, cacheHits } = await scanImagesWithCache();
+          setCacheHitCount(cacheHits);
 
-          extracted = dedupeItems(extracted);
+          let extracted = dedupeItems(allItems);
           const newItems = extracted.filter(item => !isWordInLibrary(item.word, library));
           const skipped = extracted.length - newItems.length;
           setSkippedCount(skipped);
 
+          const buildScanToast = (main) => {
+            const extras = [];
+            if (cacheHits > 0) extras.push(`${cacheHits} 張快取`);
+            if (skipped > 0) extras.push(`${skipped} 個字庫重複`);
+            return extras.length ? `${main}（${extras.join('、')}）` : main;
+          };
+
           if (newItems.length === 0) {
             setScannedResults([]);
             setImages([]);
-            showToast(skipped > 0 ? `掃描完成！${skipped} 個字詞已在字庫` : '掃描完成，但未發現有效字詞', skipped > 0 ? 'info' : 'error');
+            if (cacheHits > 0 && skipped > 0) {
+              showToast(buildScanToast('掃描完成！全部來自快取且已在字庫'), 'info');
+            } else if (skipped > 0) {
+              showToast(buildScanToast('掃描完成！字詞已在字庫'), 'info');
+            } else if (cacheHits > 0) {
+              showToast(buildScanToast('掃描完成，但未發現有效字詞'), 'info');
+            } else {
+              showToast('掃描完成，但未發現有效字詞', 'error');
+            }
             return;
           }
 
@@ -806,14 +923,10 @@
           const phraseCount = results.filter(i => i.type === 'phrase').length;
           let msg;
           if (ocrMode === 'smart') {
-            msg = skipped > 0
-              ? `智慧掃描：${wordCount} 單字、${phraseCount} 片語，跳過 ${skipped} 個重複`
-              : `智慧掃描完成！${wordCount} 單字、${phraseCount} 片語`;
+            msg = buildScanToast(`智慧掃描完成！${wordCount} 單字、${phraseCount} 片語`);
           } else {
             const label = ocrMode === 'phrase' ? '片語' : '單字';
-            msg = skipped > 0
-              ? `新發現 ${results.length} 個${label}，已跳過 ${skipped} 個字庫重複`
-              : `萃取完成！共發現 ${results.length} 個${label}`;
+            msg = buildScanToast(`萃取完成！共發現 ${results.length} 個${label}`);
           }
           showToast(msg, 'success');
         } catch (err) {
@@ -857,10 +970,10 @@
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
               {ocrMode === 'smart'
-                ? '智慧掃描：自動辨識綠色片語卡或白色單字卡，分類擷取；單字自動補例句，片語保留原例句。'
+                ? '智慧掃描：自動辨識綠色片語卡或白色單字卡，分類擷取；單字自動補例句，片語保留原例句。相同圖片會使用快取，不重複呼叫 API。'
                 : ocrMode === 'phrase'
-                  ? '片語模式：適用深綠色片語卡（含翻譯與例句），直接抄寫入庫，不另補例句。'
-                  : '單字模式：適用白色單字卡（含音標與釋義、無例句），掃描後 AI 自動補充例句。'}
+                  ? '片語模式：適用深綠色片語卡（含翻譯與例句），直接抄寫入庫，不另補例句。相同圖片會使用快取。'
+                  : '單字模式：適用白色單字卡（含音標與釋義、無例句），掃描後 AI 自動補充例句。相同圖片會使用快取。'}
             </p>
           </div>
           <div className="border-2 border-dashed border-slate-200 bg-white rounded-2xl p-6 flex flex-col items-center justify-center min-h-[160px] relative">
@@ -872,7 +985,7 @@
           {images.length > 0 && (
             <div className="grid grid-cols-4 gap-2">
               {images.map((img, idx) => (
-                <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-100"><img src={img.preview} className="object-cover w-full h-full" /><button onClick={() => handleRemoveImage(idx)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 shadow"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button></div>
+                <div key={img.hash || idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-100"><img src={img.preview} className="object-cover w-full h-full" /><button onClick={() => handleRemoveImage(idx)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 shadow"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg></button></div>
               ))}
             </div>
           )}
@@ -889,8 +1002,12 @@
                   <Icon name="doubleCheck" className="w-4 h-4" /><span>一鍵全部儲存</span>
                 </button>
               </div>
-              {skippedCount > 0 && (
-                <p className="text-xs font-medium text-slate-400 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">已自動跳過 {skippedCount} 個字庫中已有的字詞</p>
+              {(skippedCount > 0 || cacheHitCount > 0) && (
+                <p className="text-xs font-medium text-slate-400 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                  {cacheHitCount > 0 && <>已使用快取 {cacheHitCount} 張（未呼叫 API）</>}
+                  {cacheHitCount > 0 && skippedCount > 0 && ' · '}
+                  {skippedCount > 0 && <>已跳過 {skippedCount} 個字庫重複</>}
+                </p>
               )}
               {scannedResults.map((item, idx) => (
                 <div key={idx} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-3">
@@ -1015,7 +1132,7 @@
     }
 
     // --- 4. 🧠 測驗與 Anki SRS (QuizTab) ---
-    function QuizTab({ library, setLibrary, showToast, active }) {
+    function QuizTab({ apiKey, library, setLibrary, showToast, active }) {
       const [dueCards, setDueCards] = useState([]);
       const [currentCard, setCurrentCard] = useState(null);
       const [showAnswer, setShowAnswer] = useState(false);
@@ -1024,6 +1141,8 @@
       const [showHint, setShowHint] = useState(false);
       const [recordState, setRecordState] = useState('idle');
       const [hasListened, setHasListened] = useState(false);
+      const [wordBreakdown, setWordBreakdown] = useState(null);
+      const [breakdownLoading, setBreakdownLoading] = useState(false);
       const mediaRecorderRef = useRef(null);
       const mediaStreamRef = useRef(null);
       const audioChunksRef = useRef([]);
@@ -1095,6 +1214,29 @@
         }
       };
 
+      const loadWordBreakdown = async (card) => {
+        if (card.syllableParts?.length && card.kkParts?.length) {
+          setWordBreakdown({ syllableParts: card.syllableParts, kkParts: card.kkParts });
+          return;
+        }
+        if (!apiKey) {
+          setWordBreakdown(guessWordBreakdown(card));
+          return;
+        }
+        setBreakdownLoading(true);
+        try {
+          const data = await fetchWordBreakdown(apiKey, card);
+          setWordBreakdown(data);
+          setLibrary(prev => prev.map(c =>
+            c.id === card.id ? { ...c, syllableParts: data.syllableParts, kkParts: data.kkParts } : c
+          ));
+        } catch {
+          setWordBreakdown(guessWordBreakdown(card));
+        } finally {
+          setBreakdownLoading(false);
+        }
+      };
+
       const resetQuizInput = () => {
         cleanupRecording();
         setShowAnswer(false);
@@ -1103,6 +1245,8 @@
         setShowHint(false);
         setRecordState('idle');
         setHasListened(false);
+        setWordBreakdown(null);
+        setBreakdownLoading(false);
       };
 
       useEffect(() => () => cleanupRecording(), []);
@@ -1120,9 +1264,11 @@
       const handleCheckAnswer = () => {
         const cleanUser = userInput.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "");
         const cleanActual = currentCard.word.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "");
-        setIsCorrect(cleanUser === cleanActual);
+        const correct = cleanUser === cleanActual;
+        setIsCorrect(correct);
         setShowAnswer(true);
         playAudio(currentCard.word);
+        if (!correct && currentCard.type !== 'phrase') loadWordBreakdown(currentCard);
       };
 
       const handleAnkiRate = (rating) => {
@@ -1267,6 +1413,43 @@
                   )}
                 </div>
 
+                {!isCorrect && currentCard.type !== 'phrase' && (
+                  <div className="bg-slate-900 text-white rounded-2xl p-4 overflow-x-auto">
+                    {breakdownLoading ? (
+                      <div className="flex items-center justify-center gap-2 py-4 text-slate-400 text-sm font-medium">
+                        <div className="w-4 h-4 border-2 border-slate-500 border-t-white rounded-full animate-spin" />
+                        <span>載入音節拆解中…</span>
+                      </div>
+                    ) : wordBreakdown ? (
+                      <table className="w-full min-w-[320px] text-sm">
+                        <thead>
+                          <tr className="text-slate-400 text-xs border-b border-slate-700">
+                            <th className="text-left font-bold pb-2 pr-3">單字</th>
+                            <th className="text-left font-bold pb-2 pr-3">音節拆解</th>
+                            <th className="text-left font-bold pb-2 pr-3">KK 音標拆解</th>
+                            <th className="text-left font-bold pb-2">中文意思</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td className="font-bold py-3 pr-3 align-top whitespace-nowrap">{currentCard.word}</td>
+                            <td className="py-3 pr-3 align-top font-medium tracking-wide">{formatSyllableParts(wordBreakdown.syllableParts)}</td>
+                            <td className="py-3 pr-3 align-top">
+                              <div className="flex flex-wrap items-center gap-1">
+                                {wordBreakdown.kkParts.flatMap((part, i) => [
+                                  i > 0 ? <span key={`sep-${i}`} className="text-slate-500 text-xs">•</span> : null,
+                                  <span key={`kk-${i}`} className="bg-slate-700 px-2 py-0.5 rounded font-mono text-xs">[{part.replace(/^\[|\]$/g, '')}]</span>,
+                                ])}
+                              </div>
+                            </td>
+                            <td className="py-3 align-top font-bold text-slate-200">{getTranslation(currentCard)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : null}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-4 gap-2">
                   <button onClick={() => handleAnkiRate(0)} className={`bg-red-50 hover:bg-red-100 border py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition ${!isCorrect ? 'border-red-400 ring-2 ring-red-200' : 'border-red-200'} text-red-800`}>
                     <span className="text-sm font-bold">再次</span><span className="text-[10px] font-medium text-red-500">{ratingLabels?.again}</span>
@@ -1292,6 +1475,10 @@
     function SettingsTab({ apiKey, onSaveKey, library, setLibrary, showToast }) {
       const [keyInput, setKeyInput] = useState(apiKey);
       const [showClearConfirm, setShowClearConfirm] = useState(false);
+      const [showClearCacheConfirm, setShowClearCacheConfirm] = useState(false);
+      const [ocrCacheCount, setOcrCacheCount] = useState(getOcrCacheCount());
+
+      useEffect(() => { setOcrCacheCount(getOcrCacheCount()); }, []);
 
       const handleExport = () => {
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(library, null, 2));
@@ -1329,6 +1516,13 @@
         showToast('資料已成功重設！', 'success');
       };
 
+      const handleClearOcrCache = () => {
+        clearOcrCache();
+        setOcrCacheCount(0);
+        setShowClearCacheConfirm(false);
+        showToast('OCR 快取已清除', 'success');
+      };
+
       return (
         <div className="space-y-6 animate-fade-in bg-white rounded-3xl p-6 border border-slate-100 shadow-sm mt-4">
           <h2 className="text-lg font-bold text-forest-800 border-b border-slate-100 pb-3">⚙️ 系統與金鑰設定</h2>
@@ -1336,6 +1530,21 @@
             <label className="text-sm font-bold text-slate-500 block">Gemini API 金鑰</label>
             <input type="password" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} placeholder="請輸入 AIzaSy... 開頭金鑰" className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:border-forest-600 font-mono text-sm" />
             <button onClick={() => onSaveKey(keyInput.trim())} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-2.5 rounded-xl active:scale-95 transition text-sm shadow">儲存金鑰</button>
+          </div>
+          <div className="border-t border-slate-100 pt-6 space-y-4">
+            <h3 className="text-sm font-bold text-slate-500 block">🖼️ 圖片掃描快取</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">已掃描過的圖片會記住 OCR 結果（目前 {ocrCacheCount} 筆），再次上傳相同圖片時不會呼叫 API。</p>
+            {!showClearCacheConfirm ? (
+              <button onClick={() => setShowClearCacheConfirm(true)} className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold transition active:scale-95">🗑️ 清除 OCR 快取</button>
+            ) : (
+              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 space-y-3 animate-fade-in">
+                <p className="text-xs font-bold text-amber-800 text-center">清除後，相同圖片再次掃描將重新呼叫 API。確定清除？</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={handleClearOcrCache} className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 rounded-xl text-xs transition active:scale-95">確定清除</button>
+                  <button onClick={() => setShowClearCacheConfirm(false)} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold py-2 rounded-xl text-xs transition active:scale-95">取消</button>
+                </div>
+              </div>
+            )}
           </div>
           <div className="border-t border-slate-100 pt-6 space-y-4">
             <h3 className="text-sm font-bold text-slate-500 block">📦 資料管理與備份</h3>
