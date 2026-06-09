@@ -50,7 +50,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const APP_VERSION = 'T026';
+    const APP_VERSION = 'T027';
 
     const FIREBASE_CONFIG = {
       apiKey: "AIzaSyCBOTSNKF64iQzrOeJFAdTvAaXRIuEznVc",
@@ -158,7 +158,8 @@
         error: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>,
         eye: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
         edit: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path strokeLinecap="round" strokeLinejoin="round" d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>,
-        mic: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a3 3 0 003-3v-8.25a3 3 0 10-6 0v8.25a3 3 0 003 3z" /><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 4.142-3.358 7.5-7.5 7.5S4.5 14.642 4.5 10.5M12 18.75V21" /></svg>
+        mic: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a3 3 0 003-3v-8.25a3 3 0 10-6 0v8.25a3 3 0 003 3z" /><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 4.142-3.358 7.5-7.5 7.5S4.5 14.642 4.5 10.5M12 18.75V21" /></svg>,
+        phonetic: <svg fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
       };
       return <span className={`inline-block ${className}`}>{icons[name] || null}</span>;
     };
@@ -170,6 +171,75 @@
       utterance.lang = 'en-US';
       utterance.rate = 0.85;
       window.speechSynthesis.speak(utterance);
+    };
+
+    const KK_MASTERED_KEY = 'auravocab_kk_mastered';
+
+    const KK_CATEGORIES = [
+      { id: 'all', label: '全部' },
+      { id: 'vowel', label: '母音' },
+      { id: 'diphthong', label: '雙母音' },
+      { id: 'consonant', label: '子音' },
+    ];
+
+    const KK_SYMBOLS = [
+      { id: 'i', symbol: '/i/', type: 'vowel', name: '長母音 i', hint: '像「衣」拉長，嘴角向兩側展開', examples: ['sheep', 'see', 'team'], confuseWith: '/ɪ/', confuseNote: 'sheep（長 i）vs ship（短 ɪ）' },
+      { id: 'ɪ', symbol: '/ɪ/', type: 'vowel', name: '短母音 ɪ', hint: '比 /i/ 短、放鬆，像輕短的「衣」', examples: ['ship', 'sit', 'big'], confuseWith: '/i/', confuseNote: 'ship（短 ɪ）vs sheep（長 i）' },
+      { id: 'e', symbol: '/e/', type: 'vowel', name: '母音 e', hint: '像「诶」；KK 常標在 a 的長音（face）', examples: ['face', 'make', 'day'], confuseWith: '/ɛ/', confuseNote: 'face /e/ vs bed /ɛ/' },
+      { id: 'ɛ', symbol: '/ɛ/', type: 'vowel', name: '母音 ɛ', hint: '像「ㄝ」，嘴微開', examples: ['bed', 'head', 'pen'], confuseWith: '/æ/', confuseNote: 'bed /ɛ/ vs bad /æ/' },
+      { id: 'æ', symbol: '/æ/', type: 'vowel', name: '母音 æ', hint: '像「a」在 cat，嘴張大', examples: ['cat', 'bad', 'man'], confuseWith: '/ʌ/', confuseNote: 'cat /æ/ vs cut /ʌ/' },
+      { id: 'ʌ', symbol: '/ʌ/', type: 'vowel', name: '母音 ʌ', hint: '像「阿」短促、中央，嘴微張', examples: ['cup', 'but', 'sun'], confuseWith: '/ɑ/', confuseNote: 'cup /ʌ/ vs cop /ɑ/' },
+      { id: 'ə', symbol: '/ə/', type: 'vowel', name: '母音 ə（schwa）', hint: '輕讀、含糊的「呃」，常見於弱音節', examples: ['about', 'sofa', 'banana'], confuseWith: '/ʌ/', confuseNote: '弱讀 about 的 a 是 /ə/' },
+      { id: 'u', symbol: '/u/', type: 'vowel', name: '長母音 u', hint: '像「乌」拉長，嘴唇收圓', examples: ['boot', 'food', 'moon'], confuseWith: '/ʊ/', confuseNote: 'boot /u/ vs book /ʊ/' },
+      { id: 'ʊ', symbol: '/ʊ/', type: 'vowel', name: '短母音 ʊ', hint: '比 /u/ 短，嘴唇略圓', examples: ['book', 'good', 'foot'], confuseWith: '/u/', confuseNote: 'book /ʊ/ vs boot /u/' },
+      { id: 'ɔ', symbol: '/ɔ/', type: 'vowel', name: '母音 ɔ', hint: '像「喔」，嘴唇收圓、嘴張開', examples: ['law', 'saw', 'call'], confuseWith: '/ɑ/', confuseNote: 'law /ɔ/ vs lot /ɑ/' },
+      { id: 'ɑ', symbol: '/ɑ/', type: 'vowel', name: '母音 ɑ', hint: '像「啊」，嘴大開、不圓唇', examples: ['hot', 'father', 'car'], confuseWith: '/ʌ/', confuseNote: 'hot /ɑ/ vs hut /ʌ/' },
+      { id: 'o', symbol: '/o/', type: 'vowel', name: '母音 o', hint: '像「喔」滑向 u，常見於 go、no', examples: ['go', 'no', 'home'], confuseWith: '/ɔ/', confuseNote: 'go /o/ 有滑音感' },
+      { id: 'ɝ', symbol: '/ɝ/', type: 'vowel', name: '捲舌母音 ɝ', hint: '重音節的捲舌「儿」，舌頭捲起', examples: ['bird', 'word', 'nurse'], confuseWith: '/ɚ/', confuseNote: 'bird 重音 /ɝ/ vs better 的 /ɚ/' },
+      { id: 'ɚ', symbol: '/ɚ/', type: 'vowel', name: '捲舌母音 ɚ', hint: '非重音的輕捲舌「儿」', examples: ['better', 'teacher', 'paper'], confuseWith: '/ɝ/', confuseNote: 'teacher 末尾 er 常是 /ɚ/' },
+      { id: 'aɪ', symbol: '/aɪ/', type: 'diphthong', name: '雙母音 aɪ', hint: '从「a」滑到「i」，像「爱」', examples: ['bike', 'time', 'night'], confuseWith: '/e/', confuseNote: 'bike /baɪk/ 有两段音' },
+      { id: 'aʊ', symbol: '/aʊ/', type: 'diphthong', name: '雙母音 aʊ', hint: '从「a」滑到「u」，像「奥」', examples: ['house', 'now', 'out'], confuseWith: '/o/', confuseNote: 'house /haʊs/ 嘴由大到圆' },
+      { id: 'ɔɪ', symbol: '/ɔɪ/', type: 'diphthong', name: '雙母音 ɔɪ', hint: '从「ɔ」滑到「i」', examples: ['boy', 'toy', 'join'], confuseWith: '/o/', confuseNote: 'boy /bɔɪ/ 有两段音' },
+      { id: 'p', symbol: '/p/', type: 'consonant', name: '子音 p', hint: '双唇爆破，不送气，像「ㄅ」无声', examples: ['pen', 'map', 'open'], confuseWith: '/b/', confuseNote: 'pen /p/ 无声 vs ben /b/ 有声' },
+      { id: 'b', symbol: '/b/', type: 'consonant', name: '子音 b', hint: '双唇爆破，声带振动，像「ㄅ」', examples: ['bed', 'cab', 'baby'], confuseWith: '/p/', confuseNote: 'bed /b/ 有声 vs pet /p/ 无声' },
+      { id: 't', symbol: '/t/', type: 'consonant', name: '子音 t', hint: '舌尖抵上齿龈，像「ㄊ」无声', examples: ['top', 'cat', 'water'], confuseWith: '/d/', confuseNote: 'top /t/ vs dog /d/' },
+      { id: 'd', symbol: '/d/', type: 'consonant', name: '子音 d', hint: '舌尖抵上齿龈，声带振动，像「ㄉ」', examples: ['dog', 'bed', 'red'], confuseWith: '/t/', confuseNote: 'dog /d/ vs top /t/' },
+      { id: 'k', symbol: '/k/', type: 'consonant', name: '子音 k', hint: '舌根软腭，像「ㄎ」无声', examples: ['cat', 'book', 'key'], confuseWith: '/g/', confuseNote: 'cat /k/ vs go /g/' },
+      { id: 'g', symbol: '/g/', type: 'consonant', name: '子音 g', hint: '舌根软腭，声带振动，像「ㄍ」', examples: ['go', 'bag', 'green'], confuseWith: '/k/', confuseNote: 'go /g/ vs coat /k/' },
+      { id: 'f', symbol: '/f/', type: 'consonant', name: '子音 f', hint: '上齿轻触下唇，像「ㄈ」', examples: ['fan', 'life', 'off'], confuseWith: '/v/', confuseNote: 'fan /f/ vs van /v/' },
+      { id: 'v', symbol: '/v/', type: 'consonant', name: '子音 v', hint: '上齿轻触下唇，声带振动', examples: ['van', 'love', 'very'], confuseWith: '/f/', confuseNote: 'van /v/ vs fan /f/' },
+      { id: 'θ', symbol: '/θ/', type: 'consonant', name: '子音 θ', hint: '舌尖轻触上齿，无声，像咬舌吹气', examples: ['think', 'three', 'math'], confuseWith: '/s/', confuseNote: 'think /θ/ vs sink /s/' },
+      { id: 'ð', symbol: '/ð/', type: 'consonant', name: '子音 ð', hint: '舌尖轻触上齿，有声', examples: ['this', 'that', 'mother'], confuseWith: '/z/', confuseNote: 'this /ð/ vs zip /z/' },
+      { id: 's', symbol: '/s/', type: 'consonant', name: '子音 s', hint: '像「ㄙ」，舌尖近上齿龈', examples: ['sun', 'bus', 'see'], confuseWith: '/z/', confuseNote: 'bus /s/ vs buzz /z/' },
+      { id: 'z', symbol: '/z/', type: 'consonant', name: '子音 z', hint: '像「ㄙ」但声带振动', examples: ['zoo', 'buzz', 'zero'], confuseWith: '/s/', confuseNote: 'zoo /z/ vs sue /s/' },
+      { id: 'ʃ', symbol: '/ʃ/', type: 'consonant', name: '子音 ʃ', hint: '像 sh 音，嘴唇略圓', examples: ['ship', 'fish', 'shoe'], confuseWith: '/s/', confuseNote: 'ship /ʃ/ vs sip /s/' },
+      { id: 'ʒ', symbol: '/ʒ/', type: 'consonant', name: '子音 ʒ', hint: '像「ㄖ」的 sh 音，有声', examples: ['vision', 'measure', 'pleasure'], confuseWith: '/ʃ/', confuseNote: 'vision 的 si 是 /ʒ/' },
+      { id: 'h', symbol: '/h/', type: 'consonant', name: '子音 h', hint: '像轻呼气「ㄏ」', examples: ['hat', 'hello', 'who'], confuseWith: null, confuseNote: null },
+      { id: 'tʃ', symbol: '/tʃ/', type: 'consonant', name: '子音 tʃ', hint: '像「ㄑ / ch 」', examples: ['church', 'chair', 'watch'], confuseWith: '/dʒ/', confuseNote: 'church /tʃ/ vs judge /dʒ/' },
+      { id: 'dʒ', symbol: '/dʒ/', type: 'consonant', name: '子音 dʒ', hint: '像「ㄓ / j 」有声', examples: ['judge', 'job', 'age'], confuseWith: '/tʃ/', confuseNote: 'judge /dʒ/ vs church /tʃ/' },
+      { id: 'm', symbol: '/m/', type: 'consonant', name: '子音 m', hint: '双唇鼻音，像「ㄇ」', examples: ['man', 'home', 'summer'], confuseWith: '/n/', confuseNote: 'man /m/ 双唇 vs no /n/ 舌尖' },
+      { id: 'n', symbol: '/n/', type: 'consonant', name: '子音 n', hint: '舌尖鼻音，像「ㄋ」', examples: ['no', 'sun', 'nine'], confuseWith: '/ŋ/', confuseNote: 'sun /n/ vs sing /ŋ/' },
+      { id: 'ŋ', symbol: '/ŋ/', type: 'consonant', name: '子音 ŋ', hint: '舌根鼻音，像「ng」', examples: ['sing', 'long', 'think'], confuseWith: '/n/', confuseNote: 'sing 末尾是 /ŋ/ 不是 /n/' },
+      { id: 'l', symbol: '/l/', type: 'consonant', name: '子音 l', hint: '舌尖抵上齿龈，像「ㄌ」', examples: ['let', 'love', 'ball'], confuseWith: '/r/', confuseNote: 'light /l/ vs right /r/' },
+      { id: 'r', symbol: '/r/', type: 'consonant', name: '子音 r', hint: '美式 r 捲舌，嘴略圆', examples: ['red', 'car', 'run'], confuseWith: '/l/', confuseNote: 'red /r/ vs led /l/' },
+      { id: 'j', symbol: '/j/', type: 'consonant', name: '子音 j', hint: '像「ㄧ」滑音起头', examples: ['yes', 'you', 'yellow'], confuseWith: '/dʒ/', confuseNote: 'yes /j/ vs Jess /dʒ/' },
+      { id: 'w', symbol: '/w/', type: 'consonant', name: '子音 w', hint: '双唇圆，像「ㄨ」滑音起头', examples: ['wet', 'we', 'water'], confuseWith: '/v/', confuseNote: 'wet /w/ vs vet /v/' },
+    ];
+
+    const loadKkMastered = () => {
+      try {
+        const raw = localStorage.getItem(KK_MASTERED_KEY);
+        return raw ? new Set(JSON.parse(raw)) : new Set();
+      } catch { return new Set(); }
+    };
+
+    const saveKkMastered = (ids) =>
+      localStorage.setItem(KK_MASTERED_KEY, JSON.stringify([...ids]));
+
+    const pickRandomItems = (arr, count, exclude = null) => {
+      const pool = exclude ? arr.filter(x => x !== exclude) : [...arr];
+      const shuffled = pool.sort(() => Math.random() - 0.5);
+      return shuffled.slice(0, count);
     };
 
     // --- 核心工具函數 ---
@@ -1074,6 +1144,9 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
             <div className={activeTab === 'library' ? 'block' : 'hidden'}>
                <LibraryTab library={library} setLibrary={setLibrary} onTriggerSearch={handleTriggerSearch} showToast={showToast} onPractice={startPractice} />
             </div>
+            <div className={activeTab === 'kk' ? 'block' : 'hidden'}>
+               <KkTab playAudio={playAudio} library={library} />
+            </div>
             <div className={activeTab === 'practice' ? 'block' : 'hidden'}>
                {practiceWordObj && <SinglePracticeView wordObj={practiceWordObj} playAudio={playAudio} onBack={() => setActiveTab('library')} apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} />}
             </div>
@@ -1103,18 +1176,19 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
           </main>
 
           <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] z-40 pb-safe">
-            <div className="max-w-md mx-auto flex justify-around items-center h-16 text-xs text-slate-500 font-medium">
-              <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'search' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="search" className="w-5 h-5" /><span>查詢</span></button>
-              <button onClick={() => setActiveTab('vision')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'vision' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="camera" className="w-5 h-5" /><span>圖片萃取</span></button>
-              <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'library' || activeTab === 'practice' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="book" className="w-5 h-5" /><span>字庫</span></button>
-              <button onClick={() => setActiveTab('quiz')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'quiz' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}>
+            <div className="max-w-md mx-auto flex justify-around items-center h-16 text-[10px] text-slate-500 font-medium">
+              <button onClick={() => setActiveTab('search')} className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 transition ${activeTab === 'search' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="search" className="w-5 h-5" /><span>查詢</span></button>
+              <button onClick={() => setActiveTab('vision')} className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 transition ${activeTab === 'vision' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="camera" className="w-5 h-5" /><span>掃圖</span></button>
+              <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 transition ${activeTab === 'library' || activeTab === 'practice' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="book" className="w-5 h-5" /><span>字庫</span></button>
+              <button onClick={() => setActiveTab('kk')} className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 transition ${activeTab === 'kk' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="phonetic" className="w-5 h-5" /><span>音標</span></button>
+              <button onClick={() => setActiveTab('quiz')} className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 transition ${activeTab === 'quiz' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}>
                 <div className="relative">
                   <Icon name="brain" className="w-5 h-5" />
                   {dueCount > 0 && <span className="absolute -top-1 -right-1.5 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">{dueCount}</span>}
                 </div>
                 <span>測驗</span>
               </button>
-              <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition ${activeTab === 'settings' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="settings" className="w-5 h-5" /><span>設定</span></button>
+              <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 transition ${activeTab === 'settings' ? 'text-forest-700 font-bold scale-105' : 'hover:text-slate-800'}`}><Icon name="settings" className="w-5 h-5" /><span>設定</span></button>
             </div>
           </nav>
 
@@ -1125,6 +1199,337 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                 {toast.type === 'error' && <Icon name="error" className="w-4 h-4 shrink-0" />}
                 <span className="text-center">{toast.message}</span>
               </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- KK 音標分頁 ---
+    function KkTab({ playAudio, library }) {
+      const [section, setSection] = useState('learn');
+      const [category, setCategory] = useState('all');
+      const [selectedId, setSelectedId] = useState(null);
+      const [mastered, setMastered] = useState(loadKkMastered);
+      const [quizMode, setQuizMode] = useState('listen');
+      const [quiz, setQuiz] = useState(null);
+      const [quizScore, setQuizScore] = useState({ correct: 0, total: 0 });
+      const [libQuiz, setLibQuiz] = useState(null);
+      const [libRevealed, setLibRevealed] = useState(false);
+
+      const filtered = useMemo(() =>
+        category === 'all' ? KK_SYMBOLS : KK_SYMBOLS.filter(s => s.type === category),
+      [category]);
+
+      const selected = useMemo(() =>
+        KK_SYMBOLS.find(s => s.id === selectedId) || null,
+      [selectedId]);
+
+      const libraryKkCards = useMemo(() =>
+        library.filter(c => extractKkString(c.pronunciation) || c.kkParts?.length),
+      [library]);
+
+      const toggleMastered = (id) => {
+        setMastered(prev => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          saveKkMastered(next);
+          return next;
+        });
+      };
+
+      const newSymbolQuiz = (mode) => {
+        const pool = KK_SYMBOLS;
+        const sym = pool[Math.floor(Math.random() * pool.length)];
+        if (mode === 'listen') {
+          const word = sym.examples[Math.floor(Math.random() * sym.examples.length)];
+          const options = pickRandomItems(pool, 3, sym).concat(sym).sort(() => Math.random() - 0.5);
+          setQuiz({ mode, sym, word, options, answered: false, picked: null });
+        } else {
+          const word = sym.examples[0];
+          const wrongWords = pickRandomItems(
+            pool.filter(s => s.id !== sym.id).flatMap(s => s.examples),
+            3,
+          );
+          const options = [word, ...wrongWords].sort(() => Math.random() - 0.5);
+          setQuiz({ mode, sym, word, options, answered: false, picked: null });
+        }
+        setQuizScore(s => ({ ...s, total: s.total + 1 }));
+      };
+
+      const handleQuizPick = (option) => {
+        if (!quiz || quiz.answered) return;
+        const isCorrect = quiz.mode === 'listen'
+          ? option.id === quiz.sym.id
+          : option === quiz.word;
+        if (isCorrect) {
+          setQuizScore(s => ({ ...s, correct: s.correct + 1 }));
+          setMastered(prev => {
+            const next = new Set(prev);
+            next.add(quiz.sym.id);
+            saveKkMastered(next);
+            return next;
+          });
+        }
+        setQuiz(q => ({ ...q, answered: true, picked: option, isCorrect }));
+      };
+
+      const newLibQuiz = () => {
+        if (libraryKkCards.length === 0) return;
+        const card = libraryKkCards[Math.floor(Math.random() * libraryKkCards.length)];
+        const kk = extractKkString(card.pronunciation) ||
+          (card.kkParts?.length ? card.kkParts.join('') : '');
+        setLibQuiz({ card, kk });
+        setLibRevealed(false);
+      };
+
+      useEffect(() => {
+        if (section === 'quiz' && !quiz) newSymbolQuiz(quizMode);
+      }, [section]);
+
+      useEffect(() => {
+        if (section === 'library' && libraryKkCards.length > 0 && !libQuiz) newLibQuiz();
+      }, [section, libraryKkCards.length]);
+
+      const typeLabel = { vowel: '母音', diphthong: '雙母音', consonant: '子音' };
+
+      return (
+        <div className="space-y-4 animate-fade-in mt-4">
+          <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm">
+            <h2 className="text-lg font-bold text-forest-800 flex items-center gap-2">
+              <Icon name="phonetic" className="w-5 h-5 text-indigo-600" />
+              KK 音標學習
+            </h2>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              KK 音標是英文的「發音符號」，共 41 個。看到字卡或測驗裡的 KK[...] 時，可以回來對照。慢慢學，不用一次記完。
+            </p>
+            <div className="flex gap-2 mt-3 text-[11px]">
+              <span className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full font-bold">已熟悉 {mastered.size}/{KK_SYMBOLS.length}</span>
+              <span className="bg-slate-50 text-slate-500 px-2 py-1 rounded-full">例：ship /ʃɪp/ ≠ sheep /ʃip/</span>
+            </div>
+          </div>
+
+          <div className="flex bg-white rounded-2xl p-1 border border-slate-100 shadow-sm">
+            {[
+              { id: 'learn', label: '符號表' },
+              { id: 'quiz', label: '練習' },
+              { id: 'library', label: '字庫音標' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setSection(tab.id)}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition ${section === tab.id ? 'bg-forest-700 text-white shadow' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {section === 'learn' && (
+            <div className="space-y-4">
+              <div className="flex gap-1.5 flex-wrap">
+                {KK_CATEGORIES.map(cat => (
+                  <button
+                    key={cat.id}
+                    onClick={() => { setCategory(cat.id); setSelectedId(null); }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${category === cat.id ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}
+                  >
+                    {cat.label}
+                    {cat.id !== 'all' && ` (${KK_SYMBOLS.filter(s => s.type === cat.id).length})`}
+                    {cat.id === 'all' && ` (${KK_SYMBOLS.length})`}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                {filtered.map(sym => (
+                  <button
+                    key={sym.id}
+                    onClick={() => setSelectedId(sym.id === selectedId ? null : sym.id)}
+                    className={`relative rounded-xl py-3 px-1 text-center transition active:scale-95 border ${
+                      selectedId === sym.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' :
+                      mastered.has(sym.id) ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                      'bg-white border-slate-100 text-slate-700 hover:border-indigo-200'
+                    }`}
+                  >
+                    <span className="font-mono text-sm font-bold block">{sym.symbol}</span>
+                    <span className={`text-[9px] block mt-0.5 ${selectedId === sym.id ? 'text-indigo-100' : 'text-slate-400'}`}>{typeLabel[sym.type]}</span>
+                    {mastered.has(sym.id) && selectedId !== sym.id && (
+                      <span className="absolute top-1 right-1 text-emerald-500 text-[10px]">✓</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {selected && (
+                <div className="bg-white rounded-3xl p-5 border border-indigo-100 shadow-sm space-y-4 animate-fade-in">
+                  <div className="text-center">
+                    <span className="font-mono text-4xl font-bold text-indigo-700">{selected.symbol}</span>
+                    <p className="text-sm font-bold text-slate-600 mt-1">{selected.name}</p>
+                    <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{typeLabel[selected.type]}</span>
+                  </div>
+                  <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 rounded-xl p-3">{selected.hint}</p>
+                  <div>
+                    <p className="text-xs font-bold text-slate-500 mb-2">例字（點擊聽發音）</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selected.examples.map(word => (
+                        <button
+                          key={word}
+                          onClick={() => playAudio(word)}
+                          className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 px-3 py-2 rounded-xl text-sm font-bold transition active:scale-95"
+                        >
+                          <Icon name="speaker" className="w-4 h-4" />
+                          {word}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {selected.confuseNote && (
+                    <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 leading-relaxed">
+                      <span className="font-bold">易混淆：</span>{selected.confuseNote}
+                      {selected.confuseWith && <span className="font-mono ml-1">{selected.confuseWith}</span>}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => toggleMastered(selected.id)}
+                    className={`w-full py-3 rounded-xl text-xs font-bold transition active:scale-95 ${
+                      mastered.has(selected.id) ? 'bg-slate-100 text-slate-600' : 'bg-emerald-600 text-white hover:bg-emerald-500'
+                    }`}
+                  >
+                    {mastered.has(selected.id) ? '取消「已熟悉」標記' : '✓ 標記為已熟悉'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {section === 'quiz' && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                {[
+                  { id: 'listen', label: '聽音選符號' },
+                  { id: 'symbol', label: '看符號選例字' },
+                ].map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => { setQuizMode(m.id); setQuiz(null); newSymbolQuiz(m.id); }}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition ${quizMode === m.id ? 'bg-indigo-50 border-indigo-300 text-indigo-800' : 'bg-white border-slate-200 text-slate-500'}`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              {quizScore.total > 0 && (
+                <p className="text-center text-xs text-slate-500">答對 {quizScore.correct} / {quizScore.total}</p>
+              )}
+              {quiz && (
+                <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm space-y-4">
+                  {quiz.mode === 'listen' ? (
+                    <div className="text-center space-y-3">
+                      <p className="text-xs font-bold text-slate-500">聽例字發音，選出對應的 KK 符號</p>
+                      <button
+                        onClick={() => playAudio(quiz.word)}
+                        className="mx-auto flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-4 rounded-2xl font-bold text-lg transition active:scale-95 shadow-md"
+                      >
+                        <Icon name="speaker" className="w-6 h-6" />
+                        播放「{quiz.word}」
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-center space-y-2">
+                      <p className="text-xs font-bold text-slate-500">這個符號的例字是？</p>
+                      <span className="font-mono text-5xl font-bold text-indigo-700">{quiz.sym.symbol}</span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    {(quiz.mode === 'listen' ? quiz.options : quiz.options).map((opt, i) => {
+                      const label = quiz.mode === 'listen' ? opt.symbol : opt;
+                      const isPicked = quiz.mode === 'listen' ? quiz.picked?.id === opt.id : quiz.picked === opt;
+                      const isAnswer = quiz.mode === 'listen' ? opt.id === quiz.sym.id : opt === quiz.word;
+                      let cls = 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-indigo-50';
+                      if (quiz.answered) {
+                        if (isAnswer) cls = 'bg-emerald-50 border-emerald-400 text-emerald-800 ring-2 ring-emerald-200';
+                        else if (isPicked) cls = 'bg-red-50 border-red-300 text-red-700';
+                        else cls = 'bg-slate-50 border-slate-100 text-slate-400';
+                      } else if (isPicked) cls = 'bg-indigo-50 border-indigo-300 text-indigo-800';
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => handleQuizPick(opt)}
+                          disabled={quiz.answered}
+                          className={`py-3 px-2 rounded-xl text-sm font-bold border transition active:scale-95 disabled:active:scale-100 ${cls}`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {quiz.answered && (
+                    <div className="space-y-2">
+                      <p className={`text-center text-sm font-bold ${quiz.isCorrect ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {quiz.isCorrect ? '✓ 答對了！' : `✗ 正確：${quiz.mode === 'listen' ? quiz.sym.symbol : quiz.word}`}
+                      </p>
+                      {!quiz.isCorrect && (
+                        <button onClick={() => playAudio(quiz.word)} className="w-full text-xs text-indigo-600 font-bold underline">
+                          再聽一次「{quiz.word}」
+                        </button>
+                      )}
+                      <button
+                        onClick={() => newSymbolQuiz(quizMode)}
+                        className="w-full bg-forest-700 hover:bg-forest-600 text-white py-3 rounded-xl text-sm font-bold transition active:scale-95"
+                      >
+                        下一題
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {section === 'library' && (
+            <div className="space-y-4">
+              {libraryKkCards.length === 0 ? (
+                <div className="bg-white rounded-3xl p-8 border border-slate-100 text-center text-sm text-slate-400">
+                  字庫中尚無含 KK 音標的單字。<br />請先透過查詢或掃圖加入單字。
+                </div>
+              ) : libQuiz && (
+                <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4 text-center">
+                  <p className="text-xs font-bold text-slate-500">你的字庫音標練習</p>
+                  <p className="text-3xl font-bold text-forest-800">{libQuiz.card.word}</p>
+                  <p className="text-sm text-slate-500">{getTranslation(libQuiz.card)}</p>
+                  <button onClick={() => playAudio(libQuiz.card.word)} className="mx-auto flex items-center gap-2 text-indigo-600 font-bold text-sm">
+                    <Icon name="speaker" className="w-4 h-4" /> 聽發音
+                  </button>
+                  {!libRevealed ? (
+                    <button
+                      onClick={() => setLibRevealed(true)}
+                      className="w-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 py-4 rounded-2xl font-bold transition active:scale-95"
+                    >
+                      顯示 KK 音標
+                    </button>
+                  ) : (
+                    <div className="bg-slate-50 rounded-2xl p-4 space-y-2 animate-fade-in">
+                      <p className="font-mono text-xl font-bold text-indigo-700">
+                        KK[{libQuiz.kk || '—'}]
+                      </p>
+                      {libQuiz.card.syllableParts?.length > 0 && (
+                        <p className="text-xs text-slate-500">
+                          音節：{formatSyllableParts(libQuiz.card.syllableParts)}
+                          {libQuiz.card.kkParts?.length ? ` · KK：${formatSyllableParts(libQuiz.card.kkParts)}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <button
+                    onClick={newLibQuiz}
+                    className="w-full bg-forest-700 hover:bg-forest-600 text-white py-3 rounded-xl text-sm font-bold transition active:scale-95"
+                  >
+                    下一個字（共 {libraryKkCards.length} 筆有音標）
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
