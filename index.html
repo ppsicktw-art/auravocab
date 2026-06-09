@@ -9,6 +9,9 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   
   <script>
     tailwind.config = {
@@ -47,7 +50,87 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const APP_VERSION = 'T024';
+    const APP_VERSION = 'T026';
+
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCBOTSNKF64iQzrOeJFAdTvAaXRIuEznVc",
+      authDomain: "auravocab.firebaseapp.com",
+      projectId: "auravocab",
+      storageBucket: "auravocab.firebasestorage.app",
+      messagingSenderId: "112543110067",
+      appId: "1:112543110067:web:b6751662f7b48c70cdb1c6"
+    };
+
+    const SYNC_DEBOUNCE_MS = 3000;
+    const LAST_FIREBASE_SYNC_KEY = 'auravocab_last_firebase_sync';
+    const AUTO_SYNC_KEY = 'auravocab_auto_sync';
+    const LOCAL_LIB_UPDATED_KEY = 'auravocab_lib_updated_at';
+
+    let firebaseAuth = null;
+    let firebaseDb = null;
+
+    const initFirebase = () => {
+      if (!window.firebase) return null;
+      if (!firebase.apps?.length) firebase.initializeApp(FIREBASE_CONFIG);
+      if (!firebaseAuth) firebaseAuth = firebase.auth();
+      if (!firebaseDb) firebaseDb = firebase.firestore();
+      return { auth: firebaseAuth, db: firebaseDb };
+    };
+
+    const loadLastFirebaseSync = () => {
+      try {
+        const raw = localStorage.getItem(LAST_FIREBASE_SYNC_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+    };
+
+    const saveLastFirebaseSync = (info) =>
+      localStorage.setItem(LAST_FIREBASE_SYNC_KEY, JSON.stringify(info));
+
+    const loadAutoSync = () => localStorage.getItem(AUTO_SYNC_KEY) !== 'false';
+
+    const saveAutoSync = (enabled) =>
+      localStorage.setItem(AUTO_SYNC_KEY, enabled ? 'true' : 'false');
+
+    const touchLocalLibraryUpdatedAt = () =>
+      localStorage.setItem(LOCAL_LIB_UPDATED_KEY, String(Date.now()));
+
+    const getLocalLibraryUpdatedAt = () =>
+      Number(localStorage.getItem(LOCAL_LIB_UPDATED_KEY) || 0);
+
+    const getLibraryDocRef = (uid) =>
+      firebaseDb.collection('users').doc(uid).collection('data').doc('library');
+
+    const formatSyncTime = (ts) => {
+      if (!ts) return '—';
+      return new Date(ts).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+
+    const uploadLibraryToCloud = async (uid, library) => {
+      const updatedAt = Date.now();
+      touchLocalLibraryUpdatedAt();
+      await getLibraryDocRef(uid).set({
+        app: 'AuraVocab',
+        appVersion: APP_VERSION,
+        library,
+        count: library.length,
+        updatedAt,
+      });
+      const info = { direction: 'upload', at: updatedAt, count: library.length };
+      saveLastFirebaseSync(info);
+      return { updatedAt, info };
+    };
+
+    const fetchCloudLibrary = async (uid) => {
+      const snap = await getLibraryDocRef(uid).get();
+      if (!snap.exists) return null;
+      const data = snap.data();
+      return {
+        library: Array.isArray(data.library) ? data.library : [],
+        updatedAt: data.updatedAt || 0,
+        count: data.count || 0,
+      };
+    };
 
     const SPELLING_INPUT_PROPS = {
       autoComplete: 'off',
@@ -184,6 +267,37 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         throw new Error('音節拆解與單字不符');
       }
       return wrapBreakdown(card.word, { syllableParts, kkParts });
+    };
+
+    const wrapVisualLearning = (word, data) => ({
+      forWord: normalizeWordKey(word),
+      emoji: (data.emoji || '🖼️').trim(),
+      scene: (data.scene || '').trim(),
+      linkTip: (data.linkTip || '').trim(),
+    });
+
+    const getValidCachedVisualLearning = (card) => {
+      const cached = card.visualLearning;
+      if (!cached?.scene) return null;
+      if (cached.forWord !== normalizeWordKey(card.word)) return null;
+      return cached;
+    };
+
+    const fetchVisualLearning = async (apiKey, card) => {
+      const prompt = `您是英語「圖像學習法」教學專家。請為單字「${card.word}」（中文：${getTranslation(card)}）設計生動的圖像聯想，幫助台灣學習者記憶。
+規則：
+1. emoji：用 1～3 個 emoji 代表核心畫面
+2. scene：2～3 句繁體中文，描述學習者應在腦中想像的生動場景（含感官細節）
+3. linkTip：1 句繁體中文，說明字形／諧音／意義如何連結到場景
+請勿直接寫出完整英文拼字當作提示。
+僅回傳 JSON：{ "emoji": "🏆✨", "scene": "...", "linkTip": "..." }`;
+      const responseData = await fetchWithRetry(
+        `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }) }
+      );
+      const parsed = cleanJsonString(responseData.candidates[0].content.parts[0].text);
+      if (!parsed?.scene?.trim()) throw new Error('圖像聯想格式不正確');
+      return wrapVisualLearning(card.word, parsed);
     };
 
     const isWordInLibrary = (word, library) =>
@@ -466,6 +580,10 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
           state: item.state || 'new',
           learningStep: typeof item.learningStep === 'number' ? item.learningStep : 0,
           lapses: typeof item.lapses === 'number' ? item.lapses : 0,
+          visualLearning: item.visualLearning?.scene ? item.visualLearning : undefined,
+          ...(item.syllableParts?.length && item.kkParts?.length
+            ? { syllableParts: item.syllableParts, kkParts: item.kkParts, breakdownWord: item.breakdownWord }
+            : {}),
         })).map(migrateCard);
     };
 
@@ -508,8 +626,98 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       }
     };
 
+    // --- 圖像學習法元件 ---
+    function VisualLearningBlock({ card, apiKey, setLibrary, showToast, compact = false }) {
+      const [expanded, setExpanded] = useState(false);
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const reqRef = useRef(0);
+      const wordKey = normalizeWordKey(card.word);
+
+      useEffect(() => {
+        reqRef.current += 1;
+        setExpanded(false);
+        setLoading(false);
+        const cached = getValidCachedVisualLearning(card);
+        setData(cached);
+      }, [card.id, card.word]);
+
+      const persistVisual = (cardId, visual) => {
+        setLibrary(prev => prev.map(c =>
+          c.id === cardId ? { ...c, visualLearning: visual } : c
+        ));
+      };
+
+      const handleToggle = async () => {
+        if (expanded) {
+          setExpanded(false);
+          return;
+        }
+        setExpanded(true);
+        const cached = getValidCachedVisualLearning(card);
+        if (cached) {
+          setData(cached);
+          return;
+        }
+        if (!apiKey) {
+          showToast('請先至設定分頁輸入 API 金鑰以使用圖像聯想', 'error');
+          return;
+        }
+        const reqId = ++reqRef.current;
+        setLoading(true);
+        try {
+          const visual = await fetchVisualLearning(apiKey, card);
+          if (reqId !== reqRef.current) return;
+          setData(visual);
+          persistVisual(card.id, visual);
+        } catch (err) {
+          if (reqId !== reqRef.current) return;
+          showToast(`圖像聯想載入失敗: ${err.message}`, 'error');
+          setExpanded(false);
+        } finally {
+          if (reqId === reqRef.current) setLoading(false);
+        }
+      };
+
+      return (
+        <div className={`rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50/80 to-indigo-50/50 ${compact ? 'p-3' : 'p-4'} space-y-2`}>
+          <button
+            onClick={handleToggle}
+            className="w-full flex items-center justify-between gap-2 text-left active:scale-[0.99] transition"
+          >
+            <span className="text-xs font-bold text-violet-700 flex items-center gap-1.5">
+              🖼️ 圖像聯想學習
+              {data && <span className="text-[10px] font-medium text-violet-400">（已快取）</span>}
+            </span>
+            <span className="text-[10px] font-bold text-violet-500">{expanded ? '收起 ▲' : '展開 ▼'}</span>
+          </button>
+          {expanded && (
+            <div className="animate-fade-in space-y-2 pt-1 border-t border-violet-100/80">
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-3 text-violet-400 text-xs font-medium">
+                  <div className="w-4 h-4 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin" />
+                  <span>AI 正在構建圖像場景…</span>
+                </div>
+              ) : data?.forWord === wordKey ? (
+                <>
+                  <div className="text-3xl text-center py-1">{data.emoji}</div>
+                  <p className="text-sm text-slate-700 leading-relaxed font-medium">{data.scene}</p>
+                  {data.linkTip && (
+                    <p className="text-xs text-violet-600 bg-white/70 rounded-xl px-3 py-2 font-bold leading-relaxed">
+                      💡 {data.linkTip}
+                    </p>
+                  )}
+                </>
+              ) : null}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     // --- 獨立練習元件 (SinglePracticeView) ---
-    function SinglePracticeView({ wordObj, playAudio, onBack }) {
+    function SinglePracticeView({ wordObj, playAudio, onBack, apiKey, library, setLibrary, showToast }) {
+      const card = library.find(c => c.id === wordObj.id) || wordObj;
       const [input, setInput] = useState('');
       const [isRevealed, setIsRevealed] = useState(false);
       const [isCorrect, setIsCorrect] = useState(null);
@@ -537,10 +745,11 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
 
           <div className="text-center flex-1">
             {/* 相容舊卡片 translation 變數名稱 */}
-            <h2 className="text-3xl font-black text-slate-800 mb-8 leading-tight">{getTranslation(wordObj)}</h2>
+            <h2 className="text-3xl font-black text-slate-800 mb-4 leading-tight">{getTranslation(card)}</h2>
+            <VisualLearningBlock card={card} apiKey={apiKey} setLibrary={setLibrary} showToast={showToast} />
             
             {!isRevealed ? (
-              <div className="space-y-4">
+              <div className="space-y-4 mt-4">
                 <div className="flex gap-2">
                   <input 
                     type="text" autoFocus value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSubmit()} 
@@ -588,7 +797,20 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       const [searchTriggerWord, setSearchTriggerWord] = useState(''); 
       const [toast, setToast] = useState(null);
       const [practiceWordObj, setPracticeWordObj] = useState(null);
-      
+      const [firebaseUser, setFirebaseUser] = useState(null);
+      const [syncStatus, setSyncStatus] = useState('idle');
+      const [lastSync, setLastSync] = useState(loadLastFirebaseSync);
+      const [autoSync, setAutoSync] = useState(loadAutoSync);
+      const [syncConflict, setSyncConflict] = useState(null);
+      const [authLoading, setAuthLoading] = useState(false);
+
+      const libraryRef = useRef([]);
+      const syncingFromRemoteRef = useRef(false);
+      const lastCloudUpdatedAtRef = useRef(0);
+      const uploadTimerRef = useRef(null);
+      const snapshotUnsubRef = useRef(null);
+      const initialSyncDoneRef = useRef(false);
+
       const [apiKey, setApiKey] = useState(() => {
         try {
           const settings = JSON.parse(localStorage.getItem('auraSettings'));
@@ -614,10 +836,189 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         } catch { return []; }
       });
 
+      useEffect(() => { libraryRef.current = library; }, [library]);
+
       useEffect(() => { 
         localStorage.setItem('auravocab_lib', JSON.stringify(library)); 
-        localStorage.setItem('auraVocabList', JSON.stringify(library)); 
+        localStorage.setItem('auraVocabList', JSON.stringify(library));
+        if (!syncingFromRemoteRef.current) touchLocalLibraryUpdatedAt();
       }, [library]);
+
+      const applyCloudLibrary = (cloudLibrary, cloudUpdatedAt, direction = 'download') => {
+        syncingFromRemoteRef.current = true;
+        const normalized = normalizeImportedLibrary(cloudLibrary);
+        setLibrary(normalized);
+        lastCloudUpdatedAtRef.current = cloudUpdatedAt;
+        const info = { direction, at: cloudUpdatedAt || Date.now(), count: normalized.length };
+        saveLastFirebaseSync(info);
+        setLastSync(info);
+        setTimeout(() => { syncingFromRemoteRef.current = false; }, 150);
+        return normalized.length;
+      };
+
+      const startSnapshotListener = (uid) => {
+        if (snapshotUnsubRef.current) snapshotUnsubRef.current();
+        snapshotUnsubRef.current = getLibraryDocRef(uid).onSnapshot((snap) => {
+          if (!snap.exists || !initialSyncDoneRef.current) return;
+          const data = snap.data();
+          const cloudAt = data.updatedAt || 0;
+          if (cloudAt <= lastCloudUpdatedAtRef.current) return;
+          const count = applyCloudLibrary(data.library || [], cloudAt, 'download');
+          showToast(`已從雲端同步（${count} 筆）`, 'info');
+        }, (err) => console.warn('Firestore snapshot error:', err));
+      };
+
+      const runInitialSync = async (uid) => {
+        let hadConflict = false;
+        try {
+          setSyncStatus('syncing');
+          const cloud = await fetchCloudLibrary(uid);
+          const local = libraryRef.current;
+          const localCount = local.length;
+
+          if (!cloud || cloud.library.length === 0) {
+            if (localCount > 0) {
+              const { updatedAt, info } = await uploadLibraryToCloud(uid, local);
+              lastCloudUpdatedAtRef.current = updatedAt;
+              setLastSync(info);
+              showToast(`已上傳字庫至雲端（${localCount} 筆）`, 'success');
+            }
+          } else if (localCount === 0) {
+            const count = applyCloudLibrary(cloud.library, cloud.updatedAt);
+            showToast(`已從雲端下載字庫（${count} 筆）`, 'success');
+          } else {
+            hadConflict = true;
+            lastCloudUpdatedAtRef.current = cloud.updatedAt;
+            setSyncConflict({
+              cloudLibrary: cloud.library,
+              cloudUpdatedAt: cloud.updatedAt,
+              cloudCount: cloud.library.length,
+              localCount,
+              localUpdatedAt: getLocalLibraryUpdatedAt(),
+            });
+          }
+        } catch (err) {
+          showToast(`同步失敗: ${err.message}`, 'error');
+        } finally {
+          initialSyncDoneRef.current = true;
+          setSyncStatus('idle');
+          if (!hadConflict) startSnapshotListener(uid);
+        }
+      };
+
+      useEffect(() => {
+        const fb = initFirebase();
+        if (!fb) return;
+        const unsubAuth = fb.auth.onAuthStateChanged(async (user) => {
+          if (snapshotUnsubRef.current) {
+            snapshotUnsubRef.current();
+            snapshotUnsubRef.current = null;
+          }
+          initialSyncDoneRef.current = false;
+          setFirebaseUser(user);
+          if (!user) {
+            lastCloudUpdatedAtRef.current = 0;
+            return;
+          }
+          await runInitialSync(user.uid);
+        });
+        return () => {
+          unsubAuth();
+          if (snapshotUnsubRef.current) snapshotUnsubRef.current();
+          if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
+        };
+      }, []);
+
+      useEffect(() => {
+        if (!firebaseUser || !autoSync || !initialSyncDoneRef.current) return;
+        if (syncingFromRemoteRef.current || syncConflict) return;
+        if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current);
+        uploadTimerRef.current = setTimeout(async () => {
+          setSyncStatus('syncing');
+          try {
+            const { updatedAt, info } = await uploadLibraryToCloud(firebaseUser.uid, libraryRef.current);
+            lastCloudUpdatedAtRef.current = updatedAt;
+            setLastSync(info);
+          } catch (err) {
+            showToast(`上傳失敗: ${err.message}`, 'error');
+          } finally {
+            setSyncStatus('idle');
+          }
+        }, SYNC_DEBOUNCE_MS);
+        return () => { if (uploadTimerRef.current) clearTimeout(uploadTimerRef.current); };
+      }, [library, firebaseUser, autoSync, syncConflict]);
+
+      const handleGoogleSignIn = async () => {
+        const fb = initFirebase();
+        if (!fb) return showToast('Firebase 尚未載入，請重新整理', 'error');
+        setAuthLoading(true);
+        try {
+          const provider = new firebase.auth.GoogleAuthProvider();
+          await fb.auth.signInWithPopup(provider);
+          showToast('Google 登入成功', 'success');
+        } catch (err) {
+          if (err.code !== 'auth/popup-closed-by-user') {
+            showToast(`登入失敗: ${err.message}`, 'error');
+          }
+        } finally {
+          setAuthLoading(false);
+        }
+      };
+
+      const handleGoogleSignOut = async () => {
+        const fb = initFirebase();
+        if (!fb) return;
+        try {
+          await fb.auth.signOut();
+          setSyncConflict(null);
+          showToast('已登出 Google', 'info');
+        } catch (err) {
+          showToast(`登出失敗: ${err.message}`, 'error');
+        }
+      };
+
+      const handleForceSync = async () => {
+        if (!firebaseUser) return showToast('請先登入 Google', 'error');
+        setSyncStatus('syncing');
+        try {
+          const { updatedAt, info } = await uploadLibraryToCloud(firebaseUser.uid, libraryRef.current);
+          lastCloudUpdatedAtRef.current = updatedAt;
+          setLastSync(info);
+          showToast(`已上傳至雲端（${info.count} 筆）`, 'success');
+        } catch (err) {
+          showToast(`上傳失敗: ${err.message}`, 'error');
+        } finally {
+          setSyncStatus('idle');
+        }
+      };
+
+      const handleResolveConflict = async (choice) => {
+        if (!firebaseUser || !syncConflict) return;
+        setSyncStatus('syncing');
+        try {
+          if (choice === 'cloud') {
+            const count = applyCloudLibrary(syncConflict.cloudLibrary, syncConflict.cloudUpdatedAt);
+            showToast(`已使用雲端字庫（${count} 筆）`, 'success');
+          } else {
+            const { updatedAt, info } = await uploadLibraryToCloud(firebaseUser.uid, libraryRef.current);
+            lastCloudUpdatedAtRef.current = updatedAt;
+            setLastSync(info);
+            showToast(`已用本機字庫覆蓋雲端（${info.count} 筆）`, 'success');
+          }
+          setSyncConflict(null);
+          startSnapshotListener(firebaseUser.uid);
+        } catch (err) {
+          showToast(`同步失敗: ${err.message}`, 'error');
+        } finally {
+          setSyncStatus('idle');
+        }
+      };
+
+      const handleAutoSyncChange = (enabled) => {
+        setAutoSync(enabled);
+        saveAutoSync(enabled);
+        showToast(enabled ? '已開啟自動同步' : '已關閉自動同步', 'info');
+      };
 
       const showToast = (message, type = 'info') => {
         setToast({ message, type });
@@ -671,13 +1072,30 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                <LibraryTab library={library} setLibrary={setLibrary} onTriggerSearch={handleTriggerSearch} showToast={showToast} onPractice={startPractice} />
             </div>
             <div className={activeTab === 'practice' ? 'block' : 'hidden'}>
-               {practiceWordObj && <SinglePracticeView wordObj={practiceWordObj} playAudio={playAudio} onBack={() => setActiveTab('library')} />}
+               {practiceWordObj && <SinglePracticeView wordObj={practiceWordObj} playAudio={playAudio} onBack={() => setActiveTab('library')} apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} />}
             </div>
             <div className={activeTab === 'quiz' ? 'block' : 'hidden'}>
                <QuizTab apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} active={activeTab === 'quiz'} />
             </div>
             <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-               <SettingsTab apiKey={apiKey} onSaveKey={handleSaveApiKey} library={library} setLibrary={setLibrary} showToast={showToast} />
+               <SettingsTab
+                 apiKey={apiKey}
+                 onSaveKey={handleSaveApiKey}
+                 library={library}
+                 setLibrary={setLibrary}
+                 showToast={showToast}
+                 firebaseUser={firebaseUser}
+                 syncStatus={syncStatus}
+                 lastSync={lastSync}
+                 autoSync={autoSync}
+                 onAutoSyncChange={handleAutoSyncChange}
+                 onGoogleSignIn={handleGoogleSignIn}
+                 onGoogleSignOut={handleGoogleSignOut}
+                 onForceSync={handleForceSync}
+                 authLoading={authLoading}
+                 syncConflict={syncConflict}
+                 onResolveConflict={handleResolveConflict}
+               />
             </div>
           </main>
 
@@ -1449,6 +1867,16 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
               )}
             </div>
 
+            {!showAnswer && (
+              <VisualLearningBlock
+                card={library.find(c => c.id === currentCard.id) || currentCard}
+                apiKey={apiKey}
+                setLibrary={setLibrary}
+                showToast={showToast}
+                compact
+              />
+            )}
+
             {!showAnswer && step1Done && (
               <div className="space-y-4 border-t border-slate-50 pt-4">
                 <div className={`rounded-2xl p-4 space-y-2 ${step2Done ? 'bg-forest-50/40' : 'bg-forest-50/60 animate-fade-in'}`}>
@@ -1596,7 +2024,12 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
     }
 
     // --- 5. ⚙️ 設定分頁 (SettingsTab) ---
-    function SettingsTab({ apiKey, onSaveKey, library, setLibrary, showToast }) {
+    function SettingsTab({
+      apiKey, onSaveKey, library, setLibrary, showToast,
+      firebaseUser, syncStatus, lastSync, autoSync, onAutoSyncChange,
+      onGoogleSignIn, onGoogleSignOut, onForceSync, authLoading,
+      syncConflict, onResolveConflict,
+    }) {
       const [keyInput, setKeyInput] = useState(apiKey);
       const [showClearConfirm, setShowClearConfirm] = useState(false);
       const [showClearCacheConfirm, setShowClearCacheConfirm] = useState(false);
@@ -1623,7 +2056,8 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         reader.onload = (event) => {
           try {
             const parsed = JSON.parse(event.target.result);
-            const normalized = normalizeImportedLibrary(parsed);
+            const list = Array.isArray(parsed) ? parsed : parsed.library;
+            const normalized = normalizeImportedLibrary(list);
             if (normalized.length === 0) return showToast('備份中沒有有效的單字資料！', 'error');
             setLibrary(normalized);
             showToast(`字庫匯入成功！共 ${normalized.length} 筆`, 'success');
@@ -1666,6 +2100,55 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={handleClearOcrCache} className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 rounded-xl text-xs transition active:scale-95">確定清除</button>
                   <button onClick={() => setShowClearCacheConfirm(false)} className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold py-2 rounded-xl text-xs transition active:scale-95">取消</button>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="border-t border-slate-100 pt-6 space-y-4">
+            <h3 className="text-sm font-bold text-slate-500 block">☁️ Firebase 雲端同步</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              登入 Google 帳號後，字庫會自動同步至 Firestore。
+              {lastSync && <> 上次{lastSync.direction === 'upload' ? '上傳' : '下載'}：{formatSyncTime(lastSync.at)}（{lastSync.count} 筆）</>}
+            </p>
+            {firebaseUser ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-xs bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2.5">
+                  <span className="font-bold text-emerald-700 truncate">✓ {firebaseUser.email || firebaseUser.displayName || '已登入'}</span>
+                  <button onClick={onGoogleSignOut} className="text-slate-500 hover:text-slate-700 font-bold shrink-0 ml-2">登出</button>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-slate-600 font-medium cursor-pointer">
+                  <input type="checkbox" checked={autoSync} onChange={(e) => onAutoSyncChange(e.target.checked)} className="rounded" />
+                  自動同步字庫至雲端
+                </label>
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>{syncStatus === 'syncing' ? '同步中…' : syncStatus === 'error' ? '同步錯誤' : '就緒'}</span>
+                  <span>本機 {library.length} 筆</span>
+                </div>
+                <button
+                  onClick={onForceSync}
+                  disabled={syncStatus === 'syncing'}
+                  className="w-full bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 py-3 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50"
+                >
+                  {syncStatus === 'syncing' ? '同步中…' : '⬆️ 立即上傳至雲端'}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={onGoogleSignIn}
+                disabled={authLoading}
+                className="w-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {authLoading ? '登入中…' : '🔐 使用 Google 登入同步'}
+              </button>
+            )}
+            {syncConflict && (
+              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 space-y-3 animate-fade-in">
+                <p className="text-xs font-bold text-amber-800 text-center">
+                  本機（{syncConflict.localCount} 筆）與雲端（{syncConflict.cloudCount} 筆）皆有資料，請選擇要以哪邊為準：
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => onResolveConflict('cloud')} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-xl text-xs transition active:scale-95">使用雲端</button>
+                  <button onClick={() => onResolveConflict('local')} className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 rounded-xl text-xs transition active:scale-95">使用本機</button>
                 </div>
               </div>
             )}
