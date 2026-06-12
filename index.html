@@ -2179,7 +2179,9 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       }
 
       const ratingLabels = getRatingLabels(currentCard);
-      const answerDiff = buildCorrectAnswerDiff(currentCard.word, userInput.trim());
+      const spellingDiff = !isCorrect && userInput.trim()
+        ? buildSpellingDiff(currentCard.word, userInput.trim())
+        : [];
       const letterSlots = mapInputToWordSlots(currentCard.word, userInput);
       const showAnkiOptions = !isCorrectionRound;
 
@@ -2261,25 +2263,32 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                   </p>
 
                   <div className="space-y-1.5">
-                    <p className="text-xs font-bold text-slate-400">正確的英文字母</p>
-                    <div className="text-3xl font-mono font-black tracking-wider flex flex-wrap justify-center gap-0.5">
-                      {answerDiff.map((cell, i) => (
-                        <span
-                          key={i}
-                          className={
-                            cell.status === 'neutral' ? 'text-slate-400' :
-                            cell.status === 'correct' ? 'text-emerald-700' :
-                            'text-red-500'
-                          }
-                        >
-                          {cell.char}
-                        </span>
-                      ))}
+                    <p className="text-xs font-bold text-slate-400">正確單字</p>
+                    <div className="text-3xl font-mono font-black text-emerald-800 tracking-wider">
+                      {currentCard.word}
                     </div>
-                    {!isCorrect && (
-                      <p className="text-[10px] text-slate-400">綠色＝你拼對的字母　紅色＝你拼錯或漏掉的字母</p>
-                    )}
                   </div>
+
+                  {!isCorrect && spellingDiff.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-bold text-slate-400">您的拼寫</p>
+                      <div className="text-3xl font-mono font-black tracking-wider flex flex-wrap justify-center gap-0.5">
+                        {spellingDiff.map((cell, i) => (
+                          <span
+                            key={i}
+                            className={
+                              cell.status === 'correct' ? 'text-slate-700' :
+                              cell.status === 'missing' ? 'text-red-400 underline decoration-red-400 decoration-2' :
+                              'text-red-500'
+                            }
+                          >
+                            {cell.char}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400">紅色＝拼錯或缺少的字母</p>
+                    </div>
+                  )}
 
                   <div className="pt-2">
                     <span className="text-xs text-slate-400 font-bold tracking-wider">中文意思</span>
