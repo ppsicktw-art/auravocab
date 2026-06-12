@@ -2067,25 +2067,31 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       const [quizPhase, setQuizPhase] = useState(1);
       const [userInput, setUserInput] = useState('');
       const [isCorrect, setIsCorrect] = useState(null);
-      const [isCorrectionRound, setIsCorrectionRound] = useState(false);
+      const [correctionCardId, setCorrectionCardId] = useState(null);
       const spellingInputRef = useRef(null);
+      const isCorrectionRound = correctionCardId !== null;
 
       const normalizeSpelling = (s) =>
         (s || '').trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, '');
 
-      const resetQuizState = () => {
+      const resetQuizPhase = () => {
         setQuizPhase(1);
         setUserInput('');
         setIsCorrect(null);
-        setIsCorrectionRound(false);
+      };
+
+      const resetForNextCard = () => {
+        resetQuizPhase();
+        setCorrectionCardId(null);
       };
 
       const advanceToNextCard = () => {
         const prevId = currentCard.id;
+        setCorrectionCardId(null);
         const activeDue = getDueCards(library);
         setDueCards(activeDue);
         setCurrentCard(pickNextCard(activeDue, prevId));
-        resetQuizState();
+        resetQuizPhase();
       };
 
       const advanceCardWithRating = (rating) => {
@@ -2097,7 +2103,7 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         const activeDue = getDueCards(updated);
         setDueCards(activeDue);
         setCurrentCard(pickNextCard(activeDue, ratedId));
-        resetQuizState();
+        resetForNextCard();
         showToast('排程更新！', 'success');
       };
 
@@ -2105,11 +2111,24 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         if (!active) return;
         const activeDue = getDueCards(library);
         setDueCards(activeDue);
+
+        if (correctionCardId) {
+          const pinned = library.find(c => c.id === correctionCardId);
+          if (pinned) {
+            setCurrentCard(migrateCard(pinned));
+          } else {
+            setCorrectionCardId(null);
+            setCurrentCard(pickNextCard(activeDue));
+            resetQuizPhase();
+          }
+          return;
+        }
+
         if (!currentCard || !activeDue.find(c => c.id === currentCard.id)) {
           setCurrentCard(pickNextCard(activeDue));
-          resetQuizState();
+          resetForNextCard();
         }
-      }, [library, active]);
+      }, [library, active, correctionCardId]);
 
       const handleCheckAnswer = () => {
         if (!userInput.trim()) return showToast('請輸入拼寫', 'error');
@@ -2133,13 +2152,12 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         const updated = library.map(card =>
           card.id === ratedId ? applyAnkiRating(card, rating) : card
         );
+        setCorrectionCardId(ratedId);
         setLibrary(updated);
-        setDueCards(getDueCards(updated));
-        setIsCorrectionRound(true);
         setQuizPhase(1);
         setUserInput('');
         setIsCorrect(null);
-        showToast('再試一次，直到拼對為止', 'info');
+        showToast('更正練習：再試一次，直到拼對為止', 'info');
       };
 
       const handleRetrySpelling = () => {
