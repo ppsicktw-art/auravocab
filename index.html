@@ -165,12 +165,27 @@
     };
 
     const playAudio = (text) => {
+      if (!text || !window.speechSynthesis) return;
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      const speak = () => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-US';
+        utterance.rate = 0.85;
+        const voices = synth.getVoices();
+        const enVoice = voices.find(v => v.lang.startsWith('en-US') && v.localService)
+          || voices.find(v => v.lang.startsWith('en'));
+        if (enVoice) utterance.voice = enVoice;
+        synth.speak(utterance);
+      };
+      const voices = synth.getVoices();
+      if (voices.length) speak();
+      else synth.addEventListener('voiceschanged', speak, { once: true });
+    };
+
+    const preloadSpeechVoices = () => {
       if (!window.speechSynthesis) return;
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.85;
-      window.speechSynthesis.speak(utterance);
+      window.speechSynthesis.getVoices();
     };
 
     const KK_MASTERED_KEY = 'auravocab_kk_mastered';
@@ -280,6 +295,28 @@
         }
       }
       return cells;
+    };
+
+    const buildCorrectAnswerDiff = (actual, typed) => {
+      let typedIdx = 0;
+      return actual.split('').map(char => {
+        if (!/[a-zA-Z]/.test(char)) return { char, status: 'neutral' };
+        const t = typed[typedIdx];
+        typedIdx += 1;
+        if (t === undefined) return { char, status: 'wrong' };
+        if (char.toLowerCase() === t.toLowerCase()) return { char, status: 'correct' };
+        return { char, status: 'wrong' };
+      });
+    };
+
+    const mapInputToWordSlots = (word, input) => {
+      let inputIdx = 0;
+      return word.split('').map((char, i) => {
+        if (!/[a-zA-Z]/.test(char)) return { key: i, char, display: char, isLetter: false };
+        const display = inputIdx < input.length ? input[inputIdx] : '';
+        inputIdx += 1;
+        return { key: i, char, display, isLetter: true };
+      });
     };
 
     const normalizeWordKey = (word) =>
@@ -911,6 +948,8 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
 
       useEffect(() => { libraryRef.current = library; }, [library]);
 
+      useEffect(() => { preloadSpeechVoices(); }, []);
+
       useEffect(() => { 
         localStorage.setItem('auravocab_lib', JSON.stringify(library)); 
         localStorage.setItem('auraVocabList', JSON.stringify(library));
@@ -1151,7 +1190,7 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                {practiceWordObj && <SinglePracticeView wordObj={practiceWordObj} playAudio={playAudio} onBack={() => setActiveTab('library')} apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} />}
             </div>
             <div className={activeTab === 'quiz' ? 'block' : 'hidden'}>
-               <QuizTab apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} active={activeTab === 'quiz'} />
+               <QuizTab library={library} setLibrary={setLibrary} showToast={showToast} active={activeTab === 'quiz'} />
             </div>
             <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
                <SettingsTab
@@ -1291,6 +1330,12 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       useEffect(() => {
         if (section === 'library' && libraryKkCards.length > 0 && !libQuiz) newLibQuiz();
       }, [section, libraryKkCards.length]);
+
+      useEffect(() => {
+        if (section !== 'quiz' || !quiz || quiz.mode !== 'listen' || quiz.answered) return;
+        const timer = setTimeout(() => playAudio(quiz.word), 400);
+        return () => clearTimeout(timer);
+      }, [section, quiz?.word, quiz?.mode, quiz?.answered]);
 
       const typeLabel = { vowel: '母音', diphthong: '雙母音', consonant: '子音' };
 
@@ -2016,188 +2061,34 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
     }
 
     // --- 4. 🧠 測驗與 Anki SRS (QuizTab) ---
-    function QuizTab({ apiKey, library, setLibrary, showToast, active }) {
+    function QuizTab({ library, setLibrary, showToast, active }) {
       const [dueCards, setDueCards] = useState([]);
       const [currentCard, setCurrentCard] = useState(null);
-      const [showAnswer, setShowAnswer] = useState(false);
+      const [quizPhase, setQuizPhase] = useState(1);
       const [userInput, setUserInput] = useState('');
       const [isCorrect, setIsCorrect] = useState(null);
-      const [showHint, setShowHint] = useState(false);
-      const [recordState, setRecordState] = useState('idle');
-      const [hasListened, setHasListened] = useState(false);
-      const [wordBreakdown, setWordBreakdown] = useState(null);
-      const [breakdownLoading, setBreakdownLoading] = useState(false);
-      const [breakdownCardId, setBreakdownCardId] = useState(null);
-      const breakdownReqRef = useRef(0);
-      const mediaRecorderRef = useRef(null);
-      const mediaStreamRef = useRef(null);
-      const audioChunksRef = useRef([]);
-      const recordingUrlRef = useRef(null);
-      const playbackAudioRef = useRef(null);
+      const [isCorrectionRound, setIsCorrectionRound] = useState(false);
+      const spellingInputRef = useRef(null);
 
-      const cleanupRecording = () => {
-        if (playbackAudioRef.current) {
-          playbackAudioRef.current.pause();
-          playbackAudioRef.current = null;
-        }
-        if (mediaRecorderRef.current?.state === 'recording') {
-          mediaRecorderRef.current.stop();
-        }
-        mediaRecorderRef.current = null;
-        if (mediaStreamRef.current) {
-          mediaStreamRef.current.getTracks().forEach(t => t.stop());
-          mediaStreamRef.current = null;
-        }
-        if (recordingUrlRef.current) {
-          URL.revokeObjectURL(recordingUrlRef.current);
-          recordingUrlRef.current = null;
-        }
-        audioChunksRef.current = [];
-      };
+      const normalizeSpelling = (s) =>
+        (s || '').trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, '');
 
-      const playRecording = () => {
-        if (!recordingUrlRef.current) return;
-        if (playbackAudioRef.current) playbackAudioRef.current.pause();
-        const audio = new Audio(recordingUrlRef.current);
-        playbackAudioRef.current = audio;
-        audio.play();
-      };
-
-      const handleMicToggle = async () => {
-        if (recordState === 'recording') {
-          mediaRecorderRef.current?.stop();
-          return;
-        }
-        if (recordState === 'recorded') {
-          playRecording();
-          return;
-        }
-        if (!navigator.mediaDevices?.getUserMedia) {
-          return showToast('此瀏覽器不支援錄音功能', 'error');
-        }
-        try {
-          cleanupRecording();
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          mediaStreamRef.current = stream;
-          audioChunksRef.current = [];
-          const mr = new MediaRecorder(stream);
-          mr.ondataavailable = (e) => { if (e.data.size) audioChunksRef.current.push(e.data); };
-          mr.onstop = () => {
-            if (mediaStreamRef.current) {
-              mediaStreamRef.current.getTracks().forEach(t => t.stop());
-              mediaStreamRef.current = null;
-            }
-            const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' });
-            recordingUrlRef.current = URL.createObjectURL(blob);
-            setRecordState('recorded');
-            playRecording();
-          };
-          mr.start();
-          mediaRecorderRef.current = mr;
-          setRecordState('recording');
-        } catch {
-          showToast('無法存取麥克風，請允許瀏覽器權限', 'error');
-        }
-      };
-
-      const persistBreakdown = (cardId, word, data) => {
-        const key = normalizeWordKey(word);
-        setLibrary(prev => prev.map(c =>
-          c.id === cardId
-            ? { ...c, syllableParts: data.syllableParts, kkParts: data.kkParts, breakdownWord: key }
-            : c
-        ));
-      };
-
-      const clearCardBreakdown = (cardId) => {
-        setLibrary(prev => prev.map(c => {
-          if (c.id !== cardId) return c;
-          const { syllableParts, kkParts, breakdownWord, ...rest } = c;
-          return rest;
-        }));
-      };
-
-      const loadWordBreakdown = async (card) => {
-        const reqId = ++breakdownReqRef.current;
-        const cardId = card.id;
-        const wordKey = normalizeWordKey(card.word);
-        setWordBreakdown(null);
-        setBreakdownCardId(cardId);
-        setBreakdownLoading(true);
-
-        const applyBreakdown = (data) => {
-          if (reqId !== breakdownReqRef.current) return;
-          if (data.forWord !== wordKey) return;
-          setWordBreakdown(data);
-          setBreakdownCardId(cardId);
-          setBreakdownLoading(false);
-        };
-
-        const cached = getValidCachedBreakdown(card);
-        if (cached) {
-          applyBreakdown(cached);
-          return;
-        }
-        if (card.syllableParts?.length || card.kkParts?.length) {
-          clearCardBreakdown(cardId);
-        }
-        if (!apiKey) {
-          applyBreakdown(guessWordBreakdown(card));
-          return;
-        }
-        try {
-          const data = await fetchWordBreakdown(apiKey, card);
-          if (reqId !== breakdownReqRef.current) return;
-          if (data.forWord !== wordKey) return;
-          setWordBreakdown(data);
-          setBreakdownCardId(cardId);
-          setBreakdownLoading(false);
-          persistBreakdown(cardId, card.word, data);
-        } catch {
-          applyBreakdown(guessWordBreakdown(card));
-        }
-      };
-
-      const resetQuizInput = () => {
-        cleanupRecording();
-        setShowAnswer(false);
+      const resetQuizState = () => {
+        setQuizPhase(1);
         setUserInput('');
         setIsCorrect(null);
-        setShowHint(false);
-        setRecordState('idle');
-        setHasListened(false);
-        breakdownReqRef.current += 1;
-        setWordBreakdown(null);
-        setBreakdownCardId(null);
-        setBreakdownLoading(false);
+        setIsCorrectionRound(false);
       };
 
-      useEffect(() => () => cleanupRecording(), []);
-
-      useEffect(() => {
-        if (!active) return;
+      const advanceToNextCard = () => {
+        const prevId = currentCard.id;
         const activeDue = getDueCards(library);
         setDueCards(activeDue);
-        if (!currentCard || !activeDue.find(c => c.id === currentCard.id)) {
-          setCurrentCard(pickNextCard(activeDue));
-          resetQuizInput();
-        }
-      }, [library, active]);
-
-      const handleCheckAnswer = () => {
-        const cleanUser = userInput.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "");
-        const cleanActual = currentCard.word.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "");
-        const correct = cleanUser === cleanActual;
-        setIsCorrect(correct);
-        setShowAnswer(true);
-        playAudio(currentCard.word);
-        if (!correct && currentCard.type !== 'phrase') {
-          const freshCard = library.find(c => c.id === currentCard.id) || currentCard;
-          loadWordBreakdown(freshCard);
-        }
+        setCurrentCard(pickNextCard(activeDue, prevId));
+        resetQuizState();
       };
 
-      const handleAnkiRate = (rating) => {
+      const advanceCardWithRating = (rating) => {
         const ratedId = currentCard.id;
         const updated = library.map(card =>
           card.id === ratedId ? applyAnkiRating(card, rating) : card
@@ -2206,12 +2097,59 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         const activeDue = getDueCards(updated);
         setDueCards(activeDue);
         setCurrentCard(pickNextCard(activeDue, ratedId));
-        resetQuizInput();
+        resetQuizState();
         showToast('排程更新！', 'success');
       };
 
+      useEffect(() => {
+        if (!active) return;
+        const activeDue = getDueCards(library);
+        setDueCards(activeDue);
+        if (!currentCard || !activeDue.find(c => c.id === currentCard.id)) {
+          setCurrentCard(pickNextCard(activeDue));
+          resetQuizState();
+        }
+      }, [library, active]);
+
+      const handleCheckAnswer = () => {
+        if (!userInput.trim()) return showToast('請輸入拼寫', 'error');
+        const correct = normalizeSpelling(userInput) === normalizeSpelling(currentCard.word);
+        setIsCorrect(correct);
+        playAudio(currentCard.word);
+
+        if (isCorrectionRound && correct) {
+          advanceToNextCard();
+          return;
+        }
+        setQuizPhase(2);
+      };
+
+      const handleAnkiAfterAnswer = (rating) => {
+        if (isCorrect) {
+          advanceCardWithRating(rating);
+          return;
+        }
+        const ratedId = currentCard.id;
+        const updated = library.map(card =>
+          card.id === ratedId ? applyAnkiRating(card, rating) : card
+        );
+        setLibrary(updated);
+        setDueCards(getDueCards(updated));
+        setIsCorrectionRound(true);
+        setQuizPhase(1);
+        setUserInput('');
+        setIsCorrect(null);
+        showToast('再試一次，直到拼對為止', 'info');
+      };
+
+      const handleRetrySpelling = () => {
+        setQuizPhase(1);
+        setUserInput('');
+        setIsCorrect(null);
+      };
+
       if (library.length === 0) return <div className="text-center py-20 text-slate-500 font-bold">字庫還沒有單字，請先去查詢或萃取喔！</div>;
-      
+
       if (!currentCard) {
         return (
           <div className="bg-white rounded-2xl p-8 border border-slate-100 shadow-sm text-center space-y-4 animate-fade-in mt-10">
@@ -2223,16 +2161,9 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       }
 
       const ratingLabels = getRatingLabels(currentCard);
-      const step1Done = recordState === 'recorded';
-      const step2Done = hasListened;
-      const spellingDiff = (!isCorrect && userInput)
-        ? buildSpellingDiff(currentCard.word, userInput.trim())
-        : [];
-      const currentWordKey = normalizeWordKey(currentCard.word);
-      const showBreakdown = !isCorrect
-        && currentCard.type !== 'phrase'
-        && breakdownCardId === currentCard.id
-        && (breakdownLoading || wordBreakdown?.forWord === currentWordKey);
+      const answerDiff = buildCorrectAnswerDiff(currentCard.word, userInput.trim());
+      const letterSlots = mapInputToWordSlots(currentCard.word, userInput);
+      const showAnkiOptions = !isCorrectionRound;
 
       return (
         <div className="space-y-6 animate-fade-in">
@@ -2242,188 +2173,131 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
               <div className="flex gap-1.5">
                 <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">{STATE_LABELS[migrateCard(currentCard).state] || '新卡'}</span>
                 <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-bold">{currentCard.type === 'phrase' ? '片語' : '單字'}</span>
-              </div>
-            </div>
-
-            <div className="text-center py-4 space-y-2">
-              <span className="text-xs text-slate-400 font-bold tracking-wider">中文提示</span>
-              <div className="flex items-center justify-center gap-3">
-                <h3 className="text-2xl font-extrabold text-forest-800 tracking-wide">{getTranslation(currentCard) || "無中文提示"}</h3>
-                {!showAnswer && (
-                  <button
-                    onClick={handleMicToggle}
-                    title={recordState === 'recording' ? '停止並播放' : recordState === 'recorded' ? '重聽自己的發音' : '開始錄音'}
-                    className={`p-2.5 rounded-full transition active:scale-90 shrink-0 ${
-                      recordState === 'recording'
-                        ? 'bg-red-100 text-red-600 animate-recording'
-                        : recordState === 'recorded'
-                          ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                          : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
-                    }`}
-                  >
-                    <Icon name="mic" className="w-5 h-5" />
-                  </button>
+                {isCorrectionRound && (
+                  <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-bold">更正練習</span>
                 )}
               </div>
-              {!showAnswer && (
-                <p className="text-xs text-slate-400 font-medium">
-                  {!step1Done && recordState === 'idle' && '① 看著中文，按麥克風說出英文'}
-                  {!step1Done && recordState === 'recording' && '🔴 錄音中…再按一次停止並播放'}
-                  {step1Done && !step2Done && '✓ ① 已完成，再按麥克風可重聽自己的發音'}
-                  {step2Done && '✓ 可繼續聽標準發音，並拼寫英文'}
-                </p>
-              )}
             </div>
 
-            {!showAnswer && (
-              <VisualLearningBlock
-                card={library.find(c => c.id === currentCard.id) || currentCard}
-                apiKey={apiKey}
-                setLibrary={setLibrary}
-                showToast={showToast}
-                compact
-              />
+            {quizPhase === 1 && (
+              <div className="space-y-6 animate-fade-in">
+                <div className="text-center space-y-3 pt-2">
+                  <p className="text-xs font-bold text-slate-400 tracking-wider">① 聽發音，拼寫英文</p>
+                  <button
+                    onClick={() => playAudio(currentCard.word)}
+                    className="mx-auto flex items-center justify-center w-24 h-24 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full shadow-lg transition active:scale-95"
+                    aria-label="播放發音"
+                  >
+                    <Icon name="speaker" className="w-12 h-12" />
+                  </button>
+                  <p className="text-[11px] text-slate-400">點喇叭聽單字，再拼寫</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex flex-wrap justify-center gap-1.5 px-1">
+                    {letterSlots.map(slot => (
+                      slot.isLetter ? (
+                        <span
+                          key={slot.key}
+                          className="inline-flex w-9 h-11 items-center justify-center border-2 border-slate-200 rounded-lg bg-slate-50 text-xl font-bold font-mono"
+                        >
+                          {slot.display ? (
+                            <span className="text-forest-800">{slot.display}</span>
+                          ) : (
+                            <span className="text-slate-300">_</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span key={slot.key} className="w-2" />
+                      )
+                    ))}
+                  </div>
+                  <input
+                    ref={spellingInputRef}
+                    type="text"
+                    autoFocus
+                    value={userInput}
+                    onChange={(e) => setUserInput(e.target.value)}
+                    placeholder="輸入英文拼寫…"
+                    className="w-full text-center text-lg font-semibold px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-forest-600 shadow-inner"
+                    onKeyDown={(e) => e.key === 'Enter' && handleCheckAnswer()}
+                    {...SPELLING_INPUT_PROPS}
+                  />
+                </div>
+
+                <button
+                  onClick={handleCheckAnswer}
+                  className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-2xl shadow active:scale-95 transition"
+                >
+                  檢查答案
+                </button>
+              </div>
             )}
 
-            {!showAnswer && step1Done && (
-              <div className="space-y-4 border-t border-slate-50 pt-4">
-                <div className={`rounded-2xl p-4 space-y-2 ${step2Done ? 'bg-forest-50/40' : 'bg-forest-50/60 animate-fade-in'}`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-500">② 對照標準發音</span>
-                    {step2Done && <span className="text-[10px] font-bold text-emerald-600">✓ 已聆聽</span>}
-                  </div>
-                  <button
-                    onClick={() => { playAudio(currentCard.word); setHasListened(true); }}
-                    className="w-full flex items-center justify-center gap-2 py-3 bg-white hover:bg-forest-50 border border-forest-100 text-forest-700 font-bold rounded-xl transition active:scale-95"
-                  >
-                    <Icon name="speaker" className="w-5 h-5" />
-                    <span>{step2Done ? '再聽一次標準發音' : '聽標準發音，確認剛才說得對不對'}</span>
-                  </button>
-                </div>
+            {quizPhase === 2 && (
+              <div className="space-y-6 pt-2 border-t border-slate-100 animate-fade-in">
+                <div className="text-center space-y-3">
+                  <p className="text-xs font-bold text-slate-400 tracking-wider">② 答案面</p>
+                  <p className={`text-sm font-bold ${isCorrect ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {isCorrect ? '✨ 拼寫正確！' : '❌ 拼寫有誤，請對照正確字母'}
+                  </p>
 
-            {!showAnswer && step2Done && (
-              <div className="animate-fade-in space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500">③ 拼寫英文</span>
-                  {!showHint ? (
-                    <button onClick={() => setShowHint(true)} className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-full transition active:scale-95">
-                      <Icon name="eye" className="w-3.5 h-3.5" /> 長度提示
-                    </button>
-                  ) : (
-                    <button onClick={() => setShowHint(false)} className="text-[10px] font-bold text-slate-400">收起</button>
-                  )}
-                </div>
-                {showHint && (
-                  <div className="animate-fade-in bg-slate-50 border border-slate-100 px-4 py-2 rounded-xl text-center">
-                    <span className="text-lg font-mono tracking-widest whitespace-pre">
-                      {generateLiveHintPattern(currentCard.word, userInput).split('').map((ch, i) => (
-                        <span key={i} className={ch !== '_' && ch !== ' ' ? 'text-forest-700 font-bold' : 'text-slate-400'}>{ch}</span>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-bold text-slate-400">正確的英文字母</p>
+                    <div className="text-3xl font-mono font-black tracking-wider flex flex-wrap justify-center gap-0.5">
+                      {answerDiff.map((cell, i) => (
+                        <span
+                          key={i}
+                          className={
+                            cell.status === 'neutral' ? 'text-slate-400' :
+                            cell.status === 'correct' ? 'text-emerald-700' :
+                            'text-red-500'
+                          }
+                        >
+                          {cell.char}
+                        </span>
                       ))}
-                    </span>
-                  </div>
-                )}
-                <input
-                  type="text"
-                  value={userInput}
-                  onChange={(e) => setUserInput(e.target.value)}
-                  placeholder="輸入英文拼寫…"
-                  className="w-full text-center text-lg font-semibold px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:border-forest-600 shadow-inner"
-                  onKeyDown={(e) => e.key === 'Enter' && handleCheckAnswer()}
-                  {...SPELLING_INPUT_PROPS}
-                />
-                <button onClick={handleCheckAnswer} className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-2xl shadow active:scale-95 transition">💡 檢查答案</button>
-              </div>
-            )}
-              </div>
-            )}
-
-            {showAnswer && (
-              <div className="space-y-6 pt-4 border-t border-slate-100 animate-fade-in">
-                <div className="text-center space-y-2">
-                  <div className="flex items-center justify-center gap-2">
-                    <h4 className="text-3xl font-black text-emerald-800 tracking-wider">{currentCard.word}</h4>
-                    <button onClick={() => playAudio(currentCard.word)} className="p-1 bg-emerald-50 rounded-full hover:bg-emerald-100 transition active:scale-90"><Icon name="speaker" className="w-5 h-5 text-emerald-700" /></button>
-                  </div>
-                  {currentCard.pronunciation && <span className="text-sm font-mono text-slate-400 font-semibold">{currentCard.pronunciation}</span>}
-                  
-                  {isCorrect !== null && (
-                    <p className={`text-sm font-bold ${isCorrect ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {isCorrect ? '✨ 完全正確，太棒了！' : '❌ 建議按「再次」重新學習'}
-                    </p>
-                  )}
-                  {!isCorrect && spellingDiff.length > 0 && (
-                    <div className="space-y-1.5 pt-1">
-                      <p className="text-xs font-bold text-slate-400">您的拼寫</p>
-                      <div className="text-2xl font-mono font-bold tracking-wider flex flex-wrap justify-center gap-0.5">
-                        {spellingDiff.map((cell, i) => (
-                          <span
-                            key={i}
-                            className={
-                              cell.status === 'correct' ? 'text-emerald-700' :
-                              cell.status === 'missing' ? 'text-red-400 underline decoration-red-400 decoration-2' :
-                              'text-red-500'
-                            }
-                          >
-                            {cell.char}
-                          </span>
-                        ))}
-                      </div>
-                      <p className="text-[10px] text-slate-400">綠色＝正確字母　紅色＝錯誤或缺少</p>
                     </div>
+                    {!isCorrect && (
+                      <p className="text-[10px] text-slate-400">綠色＝你拼對的字母　紅色＝你拼錯或漏掉的字母</p>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <span className="text-xs text-slate-400 font-bold tracking-wider">中文意思</span>
+                    <h3 className="text-2xl font-extrabold text-forest-800 tracking-wide mt-1">
+                      {getTranslation(currentCard) || '無中文提示'}
+                    </h3>
+                  </div>
+
+                  {currentCard.pronunciation && (
+                    <span className="text-sm font-mono text-slate-400 font-semibold block">{currentCard.pronunciation}</span>
                   )}
                 </div>
 
-                {showBreakdown && (
-                  <div className="bg-slate-900 text-white rounded-2xl p-4 overflow-x-auto">
-                    {breakdownLoading ? (
-                      <div className="flex items-center justify-center gap-2 py-4 text-slate-400 text-sm font-medium">
-                        <div className="w-4 h-4 border-2 border-slate-500 border-t-white rounded-full animate-spin" />
-                        <span>載入音節拆解中…</span>
-                      </div>
-                    ) : wordBreakdown?.forWord === currentWordKey && breakdownCardId === currentCard.id ? (
-                      <table className="w-full min-w-[320px] text-sm">
-                        <thead>
-                          <tr className="text-slate-400 text-xs border-b border-slate-700">
-                            <th className="text-left font-bold pb-2 pr-3">單字</th>
-                            <th className="text-left font-bold pb-2 pr-3">音節拆解</th>
-                            <th className="text-left font-bold pb-2 pr-3">KK 音標拆解</th>
-                            <th className="text-left font-bold pb-2">中文意思</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr key={currentCard.id}>
-                            <td className="font-bold py-3 pr-3 align-top whitespace-nowrap">{currentCard.word}</td>
-                            <td className="py-3 pr-3 align-top font-medium tracking-wide">{formatSyllableParts(wordBreakdown.syllableParts)}</td>
-                            <td className="py-3 pr-3 align-top">
-                              <div className="flex flex-wrap items-center gap-1">
-                                {wordBreakdown.kkParts.flatMap((part, i) => [
-                                  i > 0 ? <span key={`sep-${i}`} className="text-slate-500 text-xs">•</span> : null,
-                                  <span key={`kk-${i}`} className="bg-slate-700 px-2 py-0.5 rounded font-mono text-xs">[{part.replace(/^\[|\]$/g, '')}]</span>,
-                                ])}
-                              </div>
-                            </td>
-                            <td className="py-3 align-top font-bold text-slate-200">{getTranslation(currentCard)}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    ) : null}
+                {showAnkiOptions ? (
+                  <div className="grid grid-cols-4 gap-2">
+                    <button onClick={() => handleAnkiAfterAnswer(0)} className={`bg-red-50 hover:bg-red-100 border py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition ${!isCorrect ? 'border-red-400 ring-2 ring-red-200' : 'border-red-200'} text-red-800`}>
+                      <span className="text-sm font-bold">再次</span><span className="text-[10px] font-medium text-red-500">{ratingLabels?.again}</span>
+                    </button>
+                    <button onClick={() => handleAnkiAfterAnswer(1)} className="bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
+                      <span className="text-sm font-bold">困難</span><span className="text-[10px] font-medium text-orange-500">{ratingLabels?.hard}</span>
+                    </button>
+                    <button onClick={() => handleAnkiAfterAnswer(2)} className={`bg-emerald-50 hover:bg-emerald-100 border py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition ${isCorrect ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-emerald-200'} text-emerald-800`}>
+                      <span className="text-sm font-bold">良好</span><span className="text-[10px] font-medium text-emerald-500">{ratingLabels?.good}</span>
+                    </button>
+                    <button onClick={() => handleAnkiAfterAnswer(3)} className="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
+                      <span className="text-sm font-bold">簡單</span><span className="text-[10px] font-medium text-blue-500">{ratingLabels?.easy}</span>
+                    </button>
                   </div>
+                ) : (
+                  <button
+                    onClick={handleRetrySpelling}
+                    className="w-full bg-forest-700 hover:bg-forest-600 text-white font-bold py-3.5 rounded-2xl shadow active:scale-95 transition"
+                  >
+                    再試一次
+                  </button>
                 )}
-
-                <div className="grid grid-cols-4 gap-2">
-                  <button onClick={() => handleAnkiRate(0)} className={`bg-red-50 hover:bg-red-100 border py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition ${!isCorrect ? 'border-red-400 ring-2 ring-red-200' : 'border-red-200'} text-red-800`}>
-                    <span className="text-sm font-bold">再次</span><span className="text-[10px] font-medium text-red-500">{ratingLabels?.again}</span>
-                  </button>
-                  <button onClick={() => handleAnkiRate(1)} className="bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">困難</span><span className="text-[10px] font-medium text-orange-500">{ratingLabels?.hard}</span>
-                  </button>
-                  <button onClick={() => handleAnkiRate(2)} className={`bg-emerald-50 hover:bg-emerald-100 border py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition ${isCorrect ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-emerald-200'} text-emerald-800`}>
-                    <span className="text-sm font-bold">良好</span><span className="text-[10px] font-medium text-emerald-500">{ratingLabels?.good}</span>
-                  </button>
-                  <button onClick={() => handleAnkiRate(3)} className="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition">
-                    <span className="text-sm font-bold">簡單</span><span className="text-[10px] font-medium text-blue-500">{ratingLabels?.easy}</span>
-                  </button>
-                </div>
               </div>
             )}
           </div>
