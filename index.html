@@ -50,7 +50,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const APP_VERSION = 'T027';
+    const APP_VERSION = 'T028';
 
     const FIREBASE_CONFIG = {
       apiKey: "AIzaSyCBOTSNKF64iQzrOeJFAdTvAaXRIuEznVc",
@@ -1190,7 +1190,7 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                {practiceWordObj && <SinglePracticeView wordObj={practiceWordObj} playAudio={playAudio} onBack={() => setActiveTab('library')} apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} />}
             </div>
             <div className={activeTab === 'quiz' ? 'block' : 'hidden'}>
-               <QuizTab library={library} setLibrary={setLibrary} showToast={showToast} active={activeTab === 'quiz'} />
+               <QuizTab apiKey={apiKey} library={library} setLibrary={setLibrary} showToast={showToast} onTriggerSearch={handleTriggerSearch} active={activeTab === 'quiz'} />
             </div>
             <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
                <SettingsTab
@@ -2061,14 +2061,19 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
     }
 
     // --- 4. 🧠 測驗與 Anki SRS (QuizTab) ---
-    function QuizTab({ library, setLibrary, showToast, active }) {
+    function QuizTab({ apiKey, library, setLibrary, showToast, onTriggerSearch, active }) {
       const [dueCards, setDueCards] = useState([]);
       const [currentCard, setCurrentCard] = useState(null);
       const [quizPhase, setQuizPhase] = useState(1);
       const [userInput, setUserInput] = useState('');
       const [isCorrect, setIsCorrect] = useState(null);
+      const [wrongAwaitingChoice, setWrongAwaitingChoice] = useState(false);
       const [correctionCardId, setCorrectionCardId] = useState(null);
+      const [wordBreakdown, setWordBreakdown] = useState(null);
+      const [breakdownLoading, setBreakdownLoading] = useState(false);
+      const [breakdownCardId, setBreakdownCardId] = useState(null);
       const spellingInputRef = useRef(null);
+      const breakdownReqRef = useRef(0);
       const isCorrectionRound = correctionCardId !== null;
 
       const normalizeSpelling = (s) =>
@@ -2078,6 +2083,11 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         setQuizPhase(1);
         setUserInput('');
         setIsCorrect(null);
+        setWrongAwaitingChoice(false);
+        breakdownReqRef.current += 1;
+        setWordBreakdown(null);
+        setBreakdownCardId(null);
+        setBreakdownLoading(false);
       };
 
       const resetForNextCard = () => {
@@ -2107,6 +2117,64 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         showToast('排程更新！', 'success');
       };
 
+      const persistBreakdown = (cardId, word, data) => {
+        const key = normalizeWordKey(word);
+        setLibrary(prev => prev.map(c =>
+          c.id === cardId
+            ? { ...c, syllableParts: data.syllableParts, kkParts: data.kkParts, breakdownWord: key }
+            : c
+        ));
+      };
+
+      const clearCardBreakdown = (cardId) => {
+        setLibrary(prev => prev.map(c => {
+          if (c.id !== cardId) return c;
+          const { syllableParts, kkParts, breakdownWord, ...rest } = c;
+          return rest;
+        }));
+      };
+
+      const loadWordBreakdown = async (card) => {
+        const reqId = ++breakdownReqRef.current;
+        const cardId = card.id;
+        const wordKey = normalizeWordKey(card.word);
+        setWordBreakdown(null);
+        setBreakdownCardId(cardId);
+        setBreakdownLoading(true);
+
+        const applyBreakdown = (data) => {
+          if (reqId !== breakdownReqRef.current) return;
+          if (data.forWord !== wordKey) return;
+          setWordBreakdown(data);
+          setBreakdownCardId(cardId);
+          setBreakdownLoading(false);
+        };
+
+        const cached = getValidCachedBreakdown(card);
+        if (cached) {
+          applyBreakdown(cached);
+          return;
+        }
+        if (card.syllableParts?.length || card.kkParts?.length) {
+          clearCardBreakdown(cardId);
+        }
+        if (!apiKey) {
+          applyBreakdown(guessWordBreakdown(card));
+          return;
+        }
+        try {
+          const data = await fetchWordBreakdown(apiKey, card);
+          if (reqId !== breakdownReqRef.current) return;
+          if (data.forWord !== wordKey) return;
+          setWordBreakdown(data);
+          setBreakdownCardId(cardId);
+          setBreakdownLoading(false);
+          persistBreakdown(cardId, card.word, data);
+        } catch {
+          applyBreakdown(guessWordBreakdown(card));
+        }
+      };
+
       useEffect(() => {
         if (!active) return;
         const activeDue = getDueCards(library);
@@ -2134,7 +2202,13 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         if (!userInput.trim()) return showToast('請輸入拼寫', 'error');
         const correct = normalizeSpelling(userInput) === normalizeSpelling(currentCard.word);
         setIsCorrect(correct);
+        setWrongAwaitingChoice(!correct);
         playAudio(currentCard.word);
+
+        if (currentCard.type !== 'phrase') {
+          const freshCard = library.find(c => c.id === currentCard.id) || currentCard;
+          loadWordBreakdown(freshCard);
+        }
 
         if (isCorrectionRound && correct) {
           advanceToNextCard();
@@ -2164,6 +2238,11 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
         setQuizPhase(1);
         setUserInput('');
         setIsCorrect(null);
+        setWrongAwaitingChoice(false);
+        breakdownReqRef.current += 1;
+        setWordBreakdown(null);
+        setBreakdownCardId(null);
+        setBreakdownLoading(false);
       };
 
       if (library.length === 0) return <div className="text-center py-20 text-slate-500 font-bold">字庫還沒有單字，請先去查詢或萃取喔！</div>;
@@ -2179,11 +2258,22 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
       }
 
       const ratingLabels = getRatingLabels(currentCard);
+      const liveCard = library.find(c => c.id === currentCard.id) || currentCard;
       const spellingDiff = !isCorrect && userInput.trim()
         ? buildSpellingDiff(currentCard.word, userInput.trim())
         : [];
       const letterSlots = mapInputToWordSlots(currentCard.word, userInput);
-      const showAnkiOptions = !isCorrectionRound;
+      const currentWordKey = normalizeWordKey(currentCard.word);
+      const cachedBreakdown = getValidCachedBreakdown(liveCard);
+      const activeBreakdown = wordBreakdown?.forWord === currentWordKey && breakdownCardId === currentCard.id
+        ? wordBreakdown
+        : cachedBreakdown;
+      const syllableParts = activeBreakdown?.syllableParts || liveCard.syllableParts;
+      const kkParts = activeBreakdown?.kkParts || liveCard.kkParts;
+      const showBreakdown = quizPhase === 2
+        && currentCard.type !== 'phrase'
+        && (breakdownLoading || activeBreakdown);
+      const showAnkiOptions = !isCorrectionRound && (isCorrect || !wrongAwaitingChoice);
 
       return (
         <div className="space-y-6 animate-fade-in">
@@ -2256,28 +2346,39 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
 
             {quizPhase === 2 && (
               <div className="space-y-6 pt-2 border-t border-slate-100 animate-fade-in">
-                <div className="text-center space-y-3">
+                <div className={`text-center space-y-3 rounded-2xl p-4 ${isCorrect ? 'bg-emerald-50/60 border border-emerald-100' : 'bg-slate-50 border border-slate-100'}`}>
                   <p className="text-xs font-bold text-slate-400 tracking-wider">② 答案面</p>
-                  <p className={`text-sm font-bold ${isCorrect ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {isCorrect ? '✨ 拼寫正確！' : '❌ 拼寫有誤，請對照正確字母'}
+                  <p className={`text-sm font-bold ${isCorrect ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {isCorrect ? '✨ 拼寫正確！' : '❌ 拼寫有誤，請對照正確答案'}
                   </p>
 
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-bold text-slate-400">正確單字</p>
-                    <div className="text-3xl font-mono font-black text-emerald-800 tracking-wider">
-                      {currentCard.word}
-                    </div>
+                  <div className="flex items-center justify-center gap-2">
+                    <h4 className="text-3xl font-black text-emerald-800 tracking-wider">{currentCard.word}</h4>
+                    <button onClick={() => playAudio(currentCard.word)} className="p-1 bg-emerald-50 rounded-full hover:bg-emerald-100 transition active:scale-90"><Icon name="speaker" className="w-5 h-5 text-emerald-700" /></button>
                   </div>
 
+                  {currentCard.pronunciation && (
+                    <span className="text-sm font-mono text-slate-500 font-semibold block">{currentCard.pronunciation}</span>
+                  )}
+
+                  {syllableParts?.length > 0 && (
+                    <div className="text-xs text-slate-500 font-medium space-y-0.5">
+                      <p>音節：{formatSyllableParts(syllableParts)}</p>
+                      {kkParts?.length > 0 && (
+                        <p className="font-mono">KK：{kkParts.map(p => `[${p.replace(/^\[|\]$/g, '')}]`).join(' • ')}</p>
+                      )}
+                    </div>
+                  )}
+
                   {!isCorrect && spellingDiff.length > 0 && (
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 pt-1">
                       <p className="text-xs font-bold text-slate-400">您的拼寫</p>
-                      <div className="text-3xl font-mono font-black tracking-wider flex flex-wrap justify-center gap-0.5">
+                      <div className="text-2xl font-mono font-bold tracking-wider flex flex-wrap justify-center gap-0.5">
                         {spellingDiff.map((cell, i) => (
                           <span
                             key={i}
                             className={
-                              cell.status === 'correct' ? 'text-slate-700' :
+                              cell.status === 'correct' ? 'text-emerald-700' :
                               cell.status === 'missing' ? 'text-red-400 underline decoration-red-400 decoration-2' :
                               'text-red-500'
                             }
@@ -2286,23 +2387,74 @@ ${getTranslation(card) ? `中文意思：${getTranslation(card)}` : ''}
                           </span>
                         ))}
                       </div>
-                      <p className="text-[10px] text-slate-400">紅色＝拼錯或缺少的字母</p>
+                      <p className="text-[10px] text-slate-400">綠色＝正確字母　紅色＝錯誤或缺少</p>
                     </div>
                   )}
 
-                  <div className="pt-2">
+                  <div className="pt-2 border-t border-slate-100/80">
                     <span className="text-xs text-slate-400 font-bold tracking-wider">中文意思</span>
-                    <h3 className="text-2xl font-extrabold text-forest-800 tracking-wide mt-1">
+                    <h3 className="text-xl font-extrabold text-forest-800 tracking-wide mt-1">
                       {getTranslation(currentCard) || '無中文提示'}
                     </h3>
                   </div>
-
-                  {currentCard.pronunciation && (
-                    <span className="text-sm font-mono text-slate-400 font-semibold block">{currentCard.pronunciation}</span>
-                  )}
                 </div>
 
-                {showAnkiOptions ? (
+                {liveCard.exampleEn && (
+                  <div className="border-t border-slate-100 pt-3 space-y-2">
+                    <span className="text-xs text-slate-400 font-bold tracking-wider">例句</span>
+                    <div className="flex items-start justify-between gap-1">
+                      <div className="text-sm text-slate-600 leading-relaxed font-medium">
+                        <InteractiveSentence text={liveCard.exampleEn} onWordClick={onTriggerSearch} />
+                      </div>
+                      <button onClick={() => playAudio(liveCard.exampleEn)} className="text-emerald-700 hover:text-emerald-800 p-1 bg-emerald-50 rounded-lg transition active:scale-90 flex-shrink-0" title="朗讀整句"><Icon name="speaker" className="w-4 h-4" /></button>
+                    </div>
+                    {liveCard.exampleZh && <p className="text-xs font-bold text-slate-400">{liveCard.exampleZh}</p>}
+                  </div>
+                )}
+
+                {showBreakdown && (
+                  <div className="bg-slate-900 text-white rounded-2xl p-4 overflow-x-auto">
+                    {breakdownLoading && !activeBreakdown ? (
+                      <div className="flex items-center justify-center gap-2 py-4 text-slate-400 text-sm font-medium">
+                        <div className="w-4 h-4 border-2 border-slate-500 border-t-white rounded-full animate-spin" />
+                        <span>載入音節拆解中…</span>
+                      </div>
+                    ) : activeBreakdown ? (
+                      <table className="w-full min-w-[320px] text-sm">
+                        <thead>
+                          <tr className="text-slate-400 text-xs border-b border-slate-700">
+                            <th className="text-left font-bold pb-2 pr-3">單字</th>
+                            <th className="text-left font-bold pb-2 pr-3">音節拆解</th>
+                            <th className="text-left font-bold pb-2 pr-3">KK 音標拆解</th>
+                            <th className="text-left font-bold pb-2">中文意思</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr key={currentCard.id}>
+                            <td className="font-bold py-3 pr-3 align-top whitespace-nowrap">{currentCard.word}</td>
+                            <td className="py-3 pr-3 align-top font-medium tracking-wide">{formatSyllableParts(activeBreakdown.syllableParts)}</td>
+                            <td className="py-3 pr-3 align-top">
+                              <div className="flex flex-wrap items-center gap-1">
+                                {activeBreakdown.kkParts.flatMap((part, i) => [
+                                  i > 0 ? <span key={`sep-${i}`} className="text-slate-500 text-xs">•</span> : null,
+                                  <span key={`kk-${i}`} className="bg-slate-700 px-2 py-0.5 rounded font-mono text-xs">[{part.replace(/^\[|\]$/g, '')}]</span>,
+                                ])}
+                              </div>
+                            </td>
+                            <td className="py-3 align-top font-bold text-slate-200">{getTranslation(currentCard)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : null}
+                  </div>
+                )}
+
+                {!isCorrect && wrongAwaitingChoice ? (
+                  <div className="flex gap-3">
+                    <button onClick={handleRetrySpelling} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3.5 rounded-2xl font-bold transition active:scale-95">繼續練習</button>
+                    <button onClick={() => setWrongAwaitingChoice(false)} className="flex-1 bg-forest-700 hover:bg-forest-600 text-white py-3.5 rounded-2xl font-bold transition active:scale-95 shadow">下一個單字</button>
+                  </div>
+                ) : showAnkiOptions ? (
                   <div className="grid grid-cols-4 gap-2">
                     <button onClick={() => handleAnkiAfterAnswer(0)} className={`bg-red-50 hover:bg-red-100 border py-3 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition ${!isCorrect ? 'border-red-400 ring-2 ring-red-200' : 'border-red-200'} text-red-800`}>
                       <span className="text-sm font-bold">再次</span><span className="text-[10px] font-medium text-red-500">{ratingLabels?.again}</span>
